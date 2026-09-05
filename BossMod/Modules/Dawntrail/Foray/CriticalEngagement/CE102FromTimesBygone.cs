@@ -33,7 +33,7 @@ public enum AID : uint
 
 sealed class MythicMirror(BossModule module) : Components.GenericAOEs(module)
 {
-    private readonly List<AOEInstance> _aoes = new(5);
+    private readonly List<AOEInstance> _aoes = [with(5)];
     private static readonly AOEShapeCircle circle = new(26f);
     private static readonly AOEShapeCone cone = new(60f, 45f.Degrees());
     private static readonly AOEShapeCross cross = new(100f, 5f);
@@ -141,7 +141,7 @@ sealed class LotsCastTB(BossModule module) : Components.BaitAwayCast(module, (ui
 
 sealed class ArcaneOrb(BossModule module) : Components.GenericAOEs(module)
 {
-    private readonly List<AOEInstance> _aoes = new(48);
+    private readonly List<AOEInstance> _aoes = [with(48)];
     private static readonly AOEShapeCircle circle = new(6f);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
@@ -204,7 +204,7 @@ sealed class CE102FromTimesBygoneStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018, NameID = 39)]
+[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018u, NameID = 39u)]
 public sealed class CE102FromTimesBygone(WorldState ws, Actor primary) : BossModule(ws, primary, arena.Center, arena)
 {
     private static readonly ArenaBoundsCustom arena = new([new Polygon(new(-800f, 245f), 24.5f, 32)]);

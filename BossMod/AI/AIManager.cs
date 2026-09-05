@@ -47,14 +47,21 @@ sealed class AIManager : IDisposable
     public void Update()
     {
         if (!WorldState.Party.Members[MasterSlot].IsValid())
+        {
             SwitchToIdle();
+        }
 
         var player = WorldState.Party.Player();
         var master = WorldState.Party[MasterSlot];
         if (Beh != null && player != null && master != null && !WorldState.Party.Members[PartyState.PlayerSlot].InCutscene)
+        {
             _ = Beh.Execute(player, master);
+        }
         else
+        {
             Controller.Clear();
+        }
+
         Controller.Update(player, Autorot.Hints, WorldState.CurrentTime);
     }
 
@@ -92,7 +99,10 @@ sealed class AIManager : IDisposable
     {
         var sources = sender.Payloads.Count != 0 ? sender.Payloads[0] : null;
         if (sources is not PlayerPayload source)
+        {
             return -1;
+        }
+
         var group = GroupManager.Instance()->GetGroup();
         var slot = -1;
         for (var i = 0; i < group->MemberCount; ++i)
@@ -110,7 +120,9 @@ sealed class AIManager : IDisposable
     {
         var messageData = message.Split(' ');
         if (messageData.Length == 0)
+        {
             return;
+        }
 
         var configModified = false;
 
@@ -170,6 +182,11 @@ sealed class AIManager : IDisposable
                 var cfgFollowT = _config.FollowTarget;
                 ToggleFollowTarget(messageData);
                 configModified = cfgFollowT != _config.FollowTarget;
+                break;
+            case "MANUALTARGET":
+                var cfgManualT = _config.ManualTarget;
+                ToggleManualTarget(messageData);
+                configModified = cfgManualT != _config.ManualTarget;
                 break;
             case "OBSTACLEMAPS":
                 var cfgOM = _config.DisableObstacleMaps;
@@ -232,23 +249,33 @@ sealed class AIManager : IDisposable
         }
 
         if (configModified)
+        {
             _config.Modified.Fire();
+        }
     }
 
     private void EnableConfig(bool enable)
     {
         if (enable)
+        {
             SwitchToFollow(_config.FollowSlot);
+        }
         else
+        {
             SwitchToIdle();
+        }
     }
 
     private void ToggleConfig()
     {
         if (Beh == null)
+        {
             SwitchToFollow(_config.FollowSlot);
+        }
         else
+        {
             SwitchToIdle();
+        }
     }
 
     private bool ToggleFocusTargetMaster()
@@ -260,7 +287,9 @@ sealed class AIManager : IDisposable
     private void ToggleObstacleMaps(string[] messageData)
     {
         if (messageData.Length == 1)
+        {
             _config.DisableObstacleMaps = !_config.DisableObstacleMaps;
+        }
         else
         {
             switch (messageData[1].ToUpperInvariant())
@@ -288,7 +317,9 @@ sealed class AIManager : IDisposable
     private void ToggleIdleWhileMounted(string[] messageData)
     {
         if (messageData.Length == 1)
+        {
             _config.ForbidAIMovementMounted = !_config.ForbidAIMovementMounted;
+        }
         else
         {
             switch (messageData[1].ToUpperInvariant())
@@ -329,17 +360,27 @@ sealed class AIManager : IDisposable
         }
         else
         {
-            var memberIndex = FindPartyMemberByName(string.Join(" ", messageData.Skip(1)));
+            var sb = new StringBuilder();
+            for (var i = 1; i < messageData.Length; ++i)
+            {
+                if (i > 1)
+                {
+                    sb.Append(' ');
+                }
+
+                sb.Append(messageData[i]);
+            }
+            var memberIndex = FindPartyMemberByName(sb.ToString());
             if (memberIndex >= 0)
             {
                 SwitchToFollow(memberIndex);
                 _config.FollowSlot = memberIndex;
             }
             else
-                    if (_config.EchoToChat)
-            {
-                Service.ChatGui.Print($"[BMRAI] Unknown party member: {string.Join(" ", messageData.Skip(1))}");
-            }
+                if (_config.EchoToChat)
+                {
+                    Service.ChatGui.Print($"[BMRAI] Unknown party member: {sb}");
+                }
         }
     }
 
@@ -356,7 +397,9 @@ sealed class AIManager : IDisposable
     private void ToggleForbidActions(string[] messageData)
     {
         if (messageData.Length == 1)
+        {
             _config.ForbidActions = !_config.ForbidActions;
+        }
         else
         {
             switch (messageData[1].ToUpperInvariant())
@@ -384,7 +427,9 @@ sealed class AIManager : IDisposable
     private void ToggleForbidMovement(string[] messageData)
     {
         if (messageData.Length == 1)
+        {
             _config.ForbidMovement = !_config.ForbidMovement;
+        }
         else
         {
             switch (messageData[1].ToUpperInvariant())
@@ -412,7 +457,9 @@ sealed class AIManager : IDisposable
     private void ToggleFollowOutOfCombat(string[] messageData)
     {
         if (messageData.Length == 1)
+        {
             _config.FollowOutOfCombat = !_config.FollowOutOfCombat;
+        }
         else
         {
             switch (messageData[1].ToUpperInvariant())
@@ -447,7 +494,9 @@ sealed class AIManager : IDisposable
                 _config.FollowDuringActiveBossModule = false;
             }
             else
+            {
                 _config.FollowDuringCombat = true;
+            }
         }
         else
         {
@@ -478,7 +527,9 @@ sealed class AIManager : IDisposable
         {
             _config.FollowDuringActiveBossModule = !_config.FollowDuringActiveBossModule;
             if (!_config.FollowDuringCombat)
+            {
                 _config.FollowDuringCombat = true;
+            }
         }
         else
         {
@@ -506,7 +557,9 @@ sealed class AIManager : IDisposable
     private void ToggleFollowTarget(string[] messageData)
     {
         if (messageData.Length == 1)
+        {
             _config.FollowTarget = !_config.FollowTarget;
+        }
         else
         {
             switch (messageData[1].ToUpperInvariant())
@@ -528,6 +581,36 @@ sealed class AIManager : IDisposable
         if (_config.EchoToChat)
         {
             Service.ChatGui.Print($"[BMRAI] Following targets is now {(_config.FollowTarget ? "enabled" : "disabled")}");
+        }
+    }
+
+    private void ToggleManualTarget(string[] messageData)
+    {
+        if (messageData.Length == 1)
+        {
+            _config.ManualTarget = !_config.ManualTarget;
+        }
+        else
+        {
+            switch (messageData[1].ToUpperInvariant())
+            {
+                case "ON":
+                    _config.ManualTarget = true;
+                    break;
+                case "OFF":
+                    _config.ManualTarget = false;
+                    break;
+                default:
+                    if (_config.EchoToChat)
+                    {
+                        Service.ChatGui.Print($"[BMRAI] Unknown manual target command: {messageData[1]}");
+                    }
+                    return;
+            }
+        }
+        if (_config.EchoToChat)
+        {
+            Service.ChatGui.Print($"[BMRAI] Manual targeting is now {(_config.ManualTarget ? "enabled" : "disabled")}");
         }
     }
 
@@ -678,7 +761,9 @@ sealed class AIManager : IDisposable
         {
             var member = Autorot.WorldState.Party[i];
             if (member != null && member.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
                 return i;
+            }
         }
         return -1;
     }
@@ -691,7 +776,7 @@ sealed class AIManager : IDisposable
             return;
         }
 
-        var userInput = string.Join(" ", presetName.Skip(1)).Trim();
+        var userInput = string.Join(" ", presetName, 1, presetName.Length - 1).Trim();
         if (userInput == "null" || string.IsNullOrWhiteSpace(userInput))
         {
             SetAIPreset(null);
@@ -703,10 +788,19 @@ sealed class AIManager : IDisposable
             return;
         }
 
-        var normalizedInput = userInput.ToUpperInvariant();
-        var preset = Autorot.Database.Presets.AllPresets
-            .FirstOrDefault(p => p.Name.Trim().Equals(normalizedInput, StringComparison.OrdinalIgnoreCase))
-            ?? RotationModuleManager.ForceDisable;
+        var allpresets = Autorot.Database.Presets.AllPresets;
+        var count = allpresets.Count;
+        Preset? preset = null;
+        for (var i = 0; i < count; ++i)
+        {
+            var p = allpresets[i];
+            if (p.Name.Trim().Equals(userInput, StringComparison.OrdinalIgnoreCase))
+            {
+                preset = p;
+                break;
+            }
+        }
+        preset ??= RotationModuleManager.ForceDisable;
 
         if (preset != null)
         {

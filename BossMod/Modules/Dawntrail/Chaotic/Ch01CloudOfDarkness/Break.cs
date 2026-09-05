@@ -2,7 +2,7 @@
 
 sealed class Break(BossModule module) : Components.GenericGaze(module)
 {
-    public readonly List<Eye> Eyes = new(3);
+    public readonly List<Eye> Eyes = [with(3)];
 
     public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor) => CollectionsMarshal.AsSpan(Eyes);
 
@@ -10,7 +10,8 @@ sealed class Break(BossModule module) : Components.GenericGaze(module)
     {
         if (spell.Action.ID is (uint)AID.BreakBoss or (uint)AID.BreakEye)
         {
-            Eyes.Add(new(spell.LocXZ, Module.CastFinishAt(spell, 0.9d)));
+            var loc = spell.LocXZ;
+            Eyes.Add(new(loc, Module.CastFinishAt(spell, 0.9d), eyeCenter: IndicatorWorldPos(loc)));
         }
     }
 

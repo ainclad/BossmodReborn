@@ -34,10 +34,15 @@ public static class ConfigConverter
                     var info = BossModuleRegistry.FindByOID(oid);
                     var config = info?.PlanLevel > 0 ? info.ConfigType : null;
                     if (config?.FullName == null)
+                    {
                         continue;
+                    }
 
                     if (j[config.FullName] is not JsonObject node)
+                    {
                         j[config.FullName] = node = [];
+                    }
+
                     node["CooldownPlans"] = planData;
                 }
             }
@@ -47,10 +52,19 @@ public static class ConfigConverter
         res.Converters.Add((j, _, _) => // v5: bloodwhetting -> raw intuition in cd planner, to support low-level content
         {
             foreach (var (k, config) in j.AsObject())
+            {
                 if (config?["CooldownPlans"]?["WAR"]?["Available"] is JsonArray plans)
+                {
                     foreach (var plan in plans)
+                    {
                         if (plan!["PlanAbilities"] is JsonObject planAbilities)
+                        {
                             planAbilities.TryRenameNode(ActionID.MakeSpell(WAR.AID.Bloodwhetting).Raw.ToString(), ActionID.MakeSpell(WAR.AID.RawIntuition).Raw.ToString());
+                        }
+                    }
+                }
+            }
+
             return j;
         });
         res.Converters.Add((j, _, _) => // v6: new cooldown planner
@@ -58,28 +72,40 @@ public static class ConfigConverter
             foreach (var (k, config) in j.AsObject())
             {
                 if (config?["CooldownPlans"] is not JsonObject plans)
+                {
                     continue;
-                bool isTEA = k == typeof(Shadowbringers.Ultimate.TEA.TEAConfig).FullName;
+                }
+
+                var isTEA = k == typeof(Shadowbringers.Ultimate.TEA.TEAConfig).FullName;
                 foreach (var (cls, planList) in plans)
                 {
                     if (planList?["Available"] is not JsonArray avail)
+                    {
                         continue;
-                    var c = Enum.Parse<Class>(cls);
+                    }
+
+                    var c = GeneratedEnumMetadata.Parse<Class>(cls);
                     foreach (var plan in avail)
                     {
                         if (plan?["PlanAbilities"] is not JsonObject abilities)
+                        {
                             continue;
+                        }
 
                         var actions = new JsonArray();
                         foreach (var (aidRaw, aidData) in abilities)
                         {
                             if (aidData is not JsonArray aidList)
+                            {
                                 continue;
+                            }
 
                             var aid = new ActionID(uint.Parse(aidRaw));
                             // hack revert, out of config modules existing before v6 only TEA could use raw intuition instead of BW
                             if (!isTEA && aid.ID == (uint)WAR.AID.RawIntuition)
+                            {
                                 aid = ActionID.MakeSpell(WAR.AID.Bloodwhetting);
+                            }
 
                             foreach (var abilUse in aidList)
                             {
@@ -110,8 +136,13 @@ public static class ConfigConverter
         res.Converters.Add((j, _, _) => // v9: and again the same thing...
         {
             foreach (var (_, config) in j.AsObject())
+            {
                 if (config is JsonObject jconfig)
+                {
                     jconfig.Remove("Modified");
+                }
+            }
+
             return j;
         });
         res.Converters.Add((j, _, f) => // v10: autorotation v2: moved configs around and importantly moved cdplans outside
@@ -121,19 +152,53 @@ public static class ConfigConverter
             ConvertV9Plans(j.AsObject(), f.Directory!);
             return j;
         });
+        res.Converters.Add((j, _, _) => // v11: repair color arrays without overwriting user customizations
+        {
+            FixColorArrays(j.AsObject());
+            return j;
+        });
         return res;
+    }
+
+    private static void FixColorArrays(JsonObject payload)
+    {
+        if (payload[typeof(ColorConfig).FullName!] is not JsonObject config)
+        {
+            return;
+        }
+
+        var defaults = ColorConfig.DefaultConfig;
+        var serializationOptions = Serialization.BuildSerializationOptions();
+        foreach (var field in GeneratedConfigMetadata.Get<ColorConfig>().Fields)
+        {
+            if (field.FieldType != typeof(Color[]) || field.Getter(defaults) is not Color[] defaultColors || config[field.Name] is not JsonArray configuredColors)
+            {
+                continue;
+            }
+            var countConfigures = configuredColors.Count;
+            var lenDefault = defaultColors.Length;
+            for (var i = countConfigures; i < lenDefault; ++i)
+            {
+                configuredColors.Add(JsonSerializer.SerializeToNode(defaultColors[i], serializationOptions));
+            }
+        }
     }
 
     private static void ConvertV1GatherChildren(JsonObject result, JsonObject json, bool isV0)
     {
         if (json["__children__"] is not JsonObject children)
+        {
             return;
+        }
+
         foreach ((var childTypeName, var jChild) in children)
         {
             if (jChild is not JsonObject jChildObj)
+            {
                 continue;
+            }
 
-            string realTypeName = isV0 ? (jChildObj["__type__"]?.ToString() ?? childTypeName) : childTypeName;
+            var realTypeName = isV0 ? (jChildObj["__type__"]?.ToString() ?? childTypeName) : childTypeName;
             ConvertV1GatherChildren(result, jChildObj, isV0);
             result.Add(realTypeName, jChild);
         }
@@ -144,7 +209,10 @@ public static class ConfigConverter
     {
         var dbRoot = new DirectoryInfo(dir.FullName + "/BossMod/autorot/plans");
         if (!dbRoot.Exists)
+        {
             dbRoot.Create();
+        }
+
         using var manifestStream = new FileStream(dbRoot + ".manifest.json", FileMode.Create, FileAccess.Write, FileShare.Read);
         using var manifest = Serialization.WriteJson(manifestStream);
         manifest.WriteStartObject();
@@ -153,15 +221,21 @@ public static class ConfigConverter
         foreach (var (ct, cfg) in payload.AsObject())
         {
             if (!cfg!.AsObject().TryRemoveNode("CooldownPlans", out var cdplans))
+            {
                 continue;
+            }
+
             var t = ct[..^6];
-            var type = Type.GetType(t);
+            var moduleInfo = BossModuleRegistry.FindByTypeName(t);
             manifest.WriteStartObject(t);
             foreach (var (cls, plans) in cdplans!.AsObject())
             {
                 manifest.WriteStartObject(cls);
                 if (plans!.AsObject().TryGetPropertyValue("SelectedIndex", out var jsel))
+                {
                     manifest.WriteNumber("SelectedIndex", jsel!.GetValue<int>());
+                }
+
                 manifest.WriteStartArray("Plans");
                 foreach (var plan in plans["Available"]!.AsArray())
                 {
@@ -172,7 +246,9 @@ public static class ConfigConverter
                     var utilityTracks = ConvertV9ActionsToUtilityTracks(oplan);
                     var rotationTracks = ConvertV9StrategiesToRotationTracks(oplan);
                     if (rotationTracks.Remove("Special", out var lb))
+                    {
                         utilityTracks["LB"] = lb;
+                    }
 
                     using var planStream = new FileStream($"{dbRoot}/{guid}.json", FileMode.Create, FileAccess.Write, FileShare.Read);
                     using var jplan = Serialization.WriteJson(planStream);
@@ -182,10 +258,13 @@ public static class ConfigConverter
                     jplan.WriteString("Name", plan!["Name"]!.GetValue<string>());
                     jplan.WriteString("Encounter", t);
                     jplan.WriteString("Class", cls);
-                    jplan.WriteNumber("Level", type != null ? BossModuleRegistry.FindByType(type)?.PlanLevel ?? 0 : 0);
+                    jplan.WriteNumber("Level", moduleInfo?.PlanLevel ?? 0);
                     jplan.WriteStartArray("PhaseDurations");
                     foreach (var d in plan["Timings"]!["PhaseDurations"]!.AsArray())
+                    {
                         jplan.WriteNumberValue(d!.GetValue<float>());
+                    }
+
                     jplan.WriteEndArray();
                     jplan.WriteStartObject("Modules");
                     ConvertV9WriteTrack(jplan, $"BossMod.Autorotation.Class{cls}Utility", utilityTracks);
@@ -222,13 +301,19 @@ public static class ConfigConverter
     {
         Dictionary<string, List<JsonObject>> tracks = [];
         if (!plan.TryGetPropertyValue("Actions", out var actions))
+        {
             return tracks;
+        }
+
         foreach (var action in actions!.AsArray())
         {
             var aobj = action!.AsObject();
             aobj["Option"] = "Use";
             if (aobj.TryRemoveNode("LowPriority", out var jprio))
+            {
                 aobj.Add("PriorityOverride", jprio!.GetValue<bool>() ? ActionQueue.Priority.Low : ActionQueue.Priority.High);
+            }
+
             if (aobj.TryRemoveNode("Target", out var jtarget))
             {
                 switch (jtarget!["Type"]!.GetValue<string>()!)
@@ -274,13 +359,25 @@ public static class ConfigConverter
     {
         Dictionary<string, List<JsonObject>> tracks = [];
         if (!plan.TryGetPropertyValue("Strategies", out var strategies))
+        {
             return tracks;
+        }
+
         foreach (var (track, values) in strategies!.AsObject())
         {
-            var t = tracks[track] = [.. values!.AsArray().Select(n => n!.AsObject())];
+            var t = tracks[track] = [];
+            foreach (var n in values!.AsArray())
+            {
+                t.Add(n!.AsObject());
+            }
+
             foreach (var v in t)
+            {
                 if (v.TryRemoveNode("Value", out var jv))
+                {
                     v["Option"] = jv;
+                }
+            }
         }
         return tracks;
     }

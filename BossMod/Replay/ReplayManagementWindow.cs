@@ -1,9 +1,9 @@
 ﻿using BossMod.Autorotation;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
-using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.ImGuiFileDialog;
-using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility.Raii;
 using Lumina.Excel.Sheets;
 using System.Diagnostics;
 using System.IO;
@@ -49,7 +49,9 @@ public sealed class ReplayManagementWindow : UIWindow
             _bmm.ModuleDeactivated.Subscribe(OnModuleDeactivation)
         );
         if (!OnZoneChange(_ws.CurrentCFCID))
+        {
             UpdateTitle();
+        }
 
         RespectCloseHotkey = false;
     }
@@ -71,10 +73,7 @@ public sealed class ReplayManagementWindow : UIWindow
         }
     }
 
-    public override void PreOpenCheck()
-    {
-        _manager.Update();
-    }
+    public override void PreOpenCheck() => _manager.Update();
 
     public override void Draw()
     {
@@ -120,7 +119,9 @@ public sealed class ReplayManagementWindow : UIWindow
 
         ImGui.SameLine();
         if (ImGui.Button("Open replay folder") && _logDir != null)
+        {
             _lastErrorMessage = OpenDirectory(_logDir);
+        }
 
         if (_lastErrorMessage.Length > 0)
         {
@@ -135,10 +136,7 @@ public sealed class ReplayManagementWindow : UIWindow
 
     public bool IsRecording() => _recorder != null;
 
-    public override void OnClose()
-    {
-        SetVisible(false);
-    }
+    public override void OnClose() => SetVisible(false);
 
     private void UpdateTitle() => WindowName = $"Replay recording: {(_recorder != null ? "in progress..." : "idle")}{_windowID}";
 
@@ -183,11 +181,16 @@ public sealed class ReplayManagementWindow : UIWindow
             Service.ChatGui.Print(seString);
         }
         if (!ShouldAutoRecord || _recordingManual)
+        {
             return false; // don't care
+        }
 
         var isDuty = cfcId != default;
         if (_recordingDuty == isDuty)
+        {
             return false; // don't care
+        }
+
         _recordingDuty = isDuty;
 
         if (isDuty && !IsRecording())
@@ -275,35 +278,42 @@ public sealed class ReplayManagementWindow : UIWindow
         return map;
     }
 
-    private bool IsImportantDuty(uint cfcId)
-    {
-        return !StaticDutyImportance.TryGetValue(cfcId, out var isImportant) || isImportant;
-    }
+    private bool IsImportantDuty(uint cfcId) => !StaticDutyImportance.TryGetValue(cfcId, out var isImportant) || isImportant;
 
     private void OnModuleActivation(BossModule m)
     {
         if (!ShouldAutoRecord || _recordingManual)
+        {
             return; // don't care
+        }
 
         ++_recordingActiveModules;
         if (!IsRecording())
+        {
             StartRecording($"{m.GetType().Name}-");
+        }
     }
 
     private void OnModuleDeactivation(BossModule m)
     {
         if (!ShouldAutoRecord || _recordingManual || _recordingActiveModules <= 0)
+        {
             return; // don't care
+        }
 
         --_recordingActiveModules;
         if (_recordingActiveModules <= 0 && !_recordingDuty && IsRecording())
+        {
             StopRecording();
+        }
     }
 
     public void StartRecording(string prefix)
     {
         if (IsRecording())
+        {
             return; // already recording
+        }
 
         _logDir.Create();
 
@@ -315,7 +325,9 @@ public sealed class ReplayManagementWindow : UIWindow
                 var replays = _logDir.GetFiles();
                 replays.Sort(static (a, b) => a.LastWriteTime.CompareTo(b.LastWriteTime));
                 foreach (var f in replays.Take(replays.Length - _config.MaxReplays))
+                {
                     f.Delete();
+                }
             }
             catch (Exception ex)
             {
@@ -325,7 +337,7 @@ public sealed class ReplayManagementWindow : UIWindow
 
         try
         {
-            _recorder = new(_ws, _config.WorldLogFormat, true, _logDir, prefix + GetPrefix());
+            _recorder = new(_ws, _config.WorldLogFormat, true, _logDir, prefix + GetPrefix(), _config.Anonymize);
         }
         catch (Exception ex)
         {
@@ -381,9 +393,15 @@ public sealed class ReplayManagementWindow : UIWindow
     {
         string? prefix = null;
         if (_ws.CurrentCFCID != default)
+        {
             prefix = Service.LuminaRow<ContentFinderCondition>(_ws.CurrentCFCID)?.Name.ToString();
+        }
+
         if (_ws.CurrentZone != default)
+        {
             prefix ??= Service.LuminaRow<TerritoryType>(_ws.CurrentZone)?.PlaceName.ValueNullable?.NameNoArticle.ToString();
+        }
+
         prefix ??= "World";
         prefix = Utils.StringToIdentifier(prefix);
 
@@ -391,29 +409,42 @@ public sealed class ReplayManagementWindow : UIWindow
         if (player != null)
         {
             prefix += "_" + player.Class + player.Level + "_";
-
-            var nameParts = player.Name.Split(' ');
-            List<string> shortenedParts = [];
-            var nameLen = nameParts.Length;
-            for (var i = 0; i < nameLen; ++i)
+            if (!_config.Anonymize)
             {
-                ref var part = ref nameParts[i];
-                var len = Math.Min(2, part.Length);
-                shortenedParts.Add(part[..len]);
-            }
+                var nameParts = player.Name.Split(' ');
+                List<string> shortenedParts = [];
+                var nameLen = nameParts.Length;
+                for (var i = 0; i < nameLen; ++i)
+                {
+                    ref var part = ref nameParts[i];
+                    var len = Math.Min(2, part.Length);
+                    shortenedParts.Add(part[..len]);
+                }
 
-            prefix += string.Join("_", shortenedParts);
+                prefix += string.Join("_", shortenedParts);
+            }
         }
 
         var cf = FFXIVClientStructs.FFXIV.Client.Game.UI.ContentsFinder.Instance();
         if (cf->IsUnrestrictedParty)
+        {
             prefix += "_U";
+        }
+
         if (cf->IsLevelSync)
+        {
             prefix += "_LS";
+        }
+
         if (cf->IsMinimalIL)
+        {
             prefix += "_MI";
+        }
+
         if (cf->IsSilenceEcho)
+        {
             prefix += "_NE";
+        }
 
         return prefix;
     }
@@ -421,7 +452,9 @@ public sealed class ReplayManagementWindow : UIWindow
     private string OpenDirectory(DirectoryInfo dir)
     {
         if (!dir.Exists)
+        {
             return $"Directory '{dir}' not found.";
+        }
 
         try
         {

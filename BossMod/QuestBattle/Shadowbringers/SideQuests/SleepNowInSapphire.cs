@@ -11,18 +11,28 @@ class SapphireWeapon(WorldState ws) : UnmanagedRotation(ws, 40f)
         if (primaryTarget == null)
         {
             if (havePyretic)
+            {
                 Hints.StatusesToCancel.Add(((uint)Roleplay.SID.PyreticBooster, Player.InstanceID));
+            }
+
             if (haveAegis)
+            {
                 Hints.StatusesToCancel.Add(((uint)Roleplay.SID.AetherialAegis, Player.InstanceID));
+            }
+
             return;
         }
 
         if (!havePyretic && !pyreticLock)
+        {
             UseAction(Roleplay.AID.PyreticBooster, Player, -100f);
+        }
 
         var vuln = StatusDetails(primaryTarget, 444u, Player.InstanceID);
         if (vuln.Left < 5f && MP >= 800u)
+        {
             UseAction(Roleplay.AID.AetherMine, primaryTarget);
+        }
 
         if (MP >= 300)
         {
@@ -38,7 +48,7 @@ class SapphireWeapon(WorldState ws) : UnmanagedRotation(ws, 40f)
                     break;
             }
 
-            if (!ActionDefinitions.IsDashDangerous(Player.Position, primaryTarget.Position, Hints))
+            if (ActionPredicate.IsDashSafe(Player.Position, primaryTarget.Position, Hints))
             {
                 UseAction(Roleplay.AID.Aethersaber, primaryTarget);
             }
@@ -47,7 +57,9 @@ class SapphireWeapon(WorldState ws) : UnmanagedRotation(ws, 40f)
         UseAction(Roleplay.AID.AetherCannon, primaryTarget);
 
         if (Player.HPMP.CurMP <= 7000u)
+        {
             UseAction(Roleplay.AID.AutoRestoration, Player, -100f);
+        }
     }
 }
 
@@ -70,25 +82,32 @@ internal class SleepNowInSapphire(WorldState ws) : QuestBattle(ws)
                     shieldActivate |= status.ID == (uint)Roleplay.SID.SafetyLockAetherialAegis;
                 };
 
-                obj.OnStatusGain += (act, status) => {
+                obj.OnStatusGain += (act, status) =>
+                {
                     if (status.ID == (uint)Roleplay.SID.PyreticBooster)
+                    {
                         pyreticActivate = false;
+                         }
                     if (status.ID == (uint)Roleplay.SID.AetherialAegis)
+                    {
                         shieldActivate = false;
+                    }
                 };
 
-                obj.AddAIHints += (player, hints) => {
+                obj.AddAIHints += (player, hints) =>
+                {
                     hints.PrioritizeAll();
                     if (pyreticActivate)
+                    {
                         hints.ActionsToExecute.Push(ActionID.MakeSpell(Roleplay.AID.PyreticBooster), player, ActionQueue.Priority.High);
+                    }
                     if (shieldActivate)
+                    {
                         hints.ActionsToExecute.Push(ActionID.MakeSpell(Roleplay.AID.AetherialAegis), player, ActionQueue.Priority.High);
+                    }
                 };
             })
         ];
 
-    public override void AddQuestAIHints(Actor player, AIHints hints)
-    {
-        _weapon.Execute(player, hints);
-    }
+    public override void AddQuestAIHints(Actor player, AIHints hints) => _weapon.Execute(player, hints);
 }

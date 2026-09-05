@@ -2,20 +2,23 @@ namespace BossMod.Stormblood.Foray.BaldesionArsenal.BA1Owain;
 
 sealed class IvoryPalm(BossModule module) : Components.GenericGaze(module)
 {
-    public readonly List<(Actor target, Actor source)> Tethers = new(2);
+    public readonly List<(Actor target, Actor source)> Tethers = [with(2)];
 
     public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor)
     {
         var count = Tethers.Count;
         if (count == 0)
+        {
             return [];
+        }
 
         for (var i = 0; i < count; ++i)
         {
             var tether = Tethers[i];
             if (tether.target == actor && !tether.source.IsDead) // apparently tethers don't get removed immediately upon death
             {
-                return new Eye[1] { new(tether.source.Position, inverted: true) };
+                var loc = tether.source.Position.Quantized();
+                return new Eye[1] { new(loc, inverted: true, eyeCenter: loc) };
             }
         }
         return [];
@@ -28,7 +31,7 @@ sealed class IvoryPalm(BossModule module) : Components.GenericGaze(module)
         for (var i = 0; i < len; ++i)
         {
             ref readonly var eye = ref eyes[i];
-            if (HitByEye(ref actor, eye) != eye.Inverted)
+            if (HitByEye(actor, eye) != eye.Inverted)
             {
                 hints.Add("Face the hand to petrify it!");
                 break;
@@ -56,7 +59,7 @@ sealed class EurekanAero(BossModule module) : Components.Cleave(module, (uint)AI
     {
         var enemies = Module.Enemies(EnemyOID);
         var count = enemies.Count;
-        List<(Actor, Actor, Angle)> origins = new(count);
+        List<(Actor, Actor, Angle)> origins = [with(count)];
         for (var i = 0; i < count; ++i)
         {
             var enemy = enemies[i];

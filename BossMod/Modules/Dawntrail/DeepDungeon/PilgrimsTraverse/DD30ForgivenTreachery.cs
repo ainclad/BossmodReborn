@@ -1,4 +1,4 @@
-namespace BossMod.Endwalker.DeepDungeon.PilgrimsTraverse.DD30ForgivenTreachery;
+namespace BossMod.Dawntrail.DeepDungeon.PilgrimsTraverse.DD30ForgivenTreachery;
 
 public enum OID : uint
 {
@@ -44,10 +44,9 @@ public enum IconID : uint
     DivineFavor = 197 // player->self
 }
 
-[SkipLocalsInit]
 sealed class BrutalHalo(BossModule module) : Components.GenericAOEs(module)
 {
-    private readonly List<AOEInstance> _aoes = new(5);
+    private readonly List<AOEInstance> _aoes = [with(5)];
     private readonly AOEShapeDonut donut1 = new(9f, 14f), donut2 = new(14f, 19f), donut3 = new(19f, 24f), donut4 = new(24f, 29f);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoes.Count != 0 ? CollectionsMarshal.AsSpan(_aoes)[..1] : [];
@@ -82,7 +81,7 @@ sealed class BoundsOfIndulgence(BossModule module) : Components.GenericAOEs(modu
 {
     private readonly List<Actor> voidzones = [];
     private readonly AOEShapeCircle circle = new(4f);
-    private readonly AOEShapeArcCapsule arcCW = new(4f, 30f.Degrees(), new(-300f, -300f)), arcCCW = new(4f, -30f.Degrees(), new(-300f, -300f));
+    private readonly AOEShapeArcCapsule arcCW = new(4f, 30f.Degrees(), module.Arena.Center), arcCCW = new(4f, -30f.Degrees(), module.Arena.Center);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -140,7 +139,7 @@ sealed class BoundsOfIndulgence(BossModule module) : Components.GenericAOEs(modu
         var center = Arena.Center;
         var a15 = 15f.Degrees();
         var a25 = 25f.Degrees();
-        var a35 = 35f.Degrees();
+        var a30 = 30f.Degrees();
         for (var i = 0; i < count; ++i)
         {
             var vz = voidzones[i];
@@ -153,20 +152,18 @@ sealed class BoundsOfIndulgence(BossModule module) : Components.GenericAOEs(modu
             {
                 hints.AddForbiddenZone(new SDArcCapsule(pos, center, mult * a15, 4f), forbiddenNearFuture);
                 hints.AddForbiddenZone(new SDArcCapsule(pos, center, mult * a25, 4f), forbiddenSoon);
-                hints.AddForbiddenZone(new SDArcCapsule(pos, center, mult * a35, 4f), forbiddenFarFuture);
+                hints.AddForbiddenZone(new SDArcCapsule(pos, center, mult * a30, 4f), forbiddenFarFuture);
             }
             hints.TemporaryObstacles.Add(new SDCircle(pos.Quantized(), mov ? 4f : 5f));
         }
     }
 }
 
-[SkipLocalsInit]
 sealed class DivineFavor(BossModule module) : Components.StandardChasingAOEs(module, 4f, (uint)AID.DivineFavorFirst, (uint)AID.DivineFavorRest, 3.5f, 0.6d, 8, true, (uint)IconID.DivineFavor);
 
-[SkipLocalsInit]
 sealed class GripOfSalvationsReach(BossModule module) : Components.GenericAOEs(module)
 {
-    private readonly List<AOEInstance> _aoes = new(2);
+    private readonly List<AOEInstance> _aoes = [with(2)];
     private readonly AOEShapeCone cone = new(30f, 110f.Degrees());
     private readonly AOEShapeRect rect = new(60f, 15f), rectFake = new(60f, 30f);
 
@@ -214,7 +211,6 @@ sealed class GripOfSalvationsReach(BossModule module) : Components.GenericAOEs(m
     }
 }
 
-[SkipLocalsInit]
 sealed class DD30ForgivenTreacheryStates : StateMachineBuilder
 {
     public DD30ForgivenTreacheryStates(BossModule module) : base(module)
@@ -227,24 +223,7 @@ sealed class DD30ForgivenTreacheryStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.Verified,
-StatesType = typeof(DD30ForgivenTreacheryStates),
-ConfigType = null,
-ObjectIDType = typeof(OID),
-ActionIDType = typeof(AID),
-StatusIDType = null,
-TetherIDType = null,
-IconIDType = typeof(IconID),
-PrimaryActorOID = (uint)OID.ForgivenTreachery,
-Contributors = "The Combat Reborn Team (Malediktus)",
-Expansion = BossModuleInfo.Expansion.Dawntrail,
-Category = BossModuleInfo.Category.DeepDungeon,
-GroupType = BossModuleInfo.GroupType.CFC,
-GroupID = 1034u,
-NameID = 13863u,
-SortOrder = 1,
-PlanLevel = 0)]
-[SkipLocalsInit]
+[ModuleInfo(BossModuleInfo.Maturity.Verified, PrimaryActorOID = (uint)OID.ForgivenTreachery, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CFC, GroupID = 1034u, NameID = 13863u)]
 public sealed class DD30ForgivenTreachery : BossModule
 {
     public DD30ForgivenTreachery(WorldState ws, Actor primary) : this(ws, primary, BuildArena()) { }

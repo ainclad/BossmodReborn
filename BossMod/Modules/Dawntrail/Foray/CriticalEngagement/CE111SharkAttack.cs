@@ -40,7 +40,7 @@ public enum AID : uint
 
 sealed class TidalGuillotine(BossModule module) : Components.GenericAOEs(module)
 {
-    private readonly List<AOEInstance> _aoes = new(3);
+    private readonly List<AOEInstance> _aoes = [with(3)];
     private static readonly AOEShapeCircle circle = new(20f);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
@@ -93,7 +93,7 @@ abstract class OpenWater(BossModule module, int maxCasts, float timeToMove, Angl
 {
     private readonly int MaxCasts = maxCasts;
     private readonly float TimeToMove = timeToMove;
-    private readonly List<AOEInstance> _aoes = new(maxCasts);
+    private readonly List<AOEInstance> _aoes = [with(maxCasts)];
     private static readonly AOEShapeCircle circleIn = new(4f), circleOut = new(5f);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
@@ -164,7 +164,7 @@ sealed class CE111SharkAttackStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018, NameID = 41)]
+[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018u, NameID = 41u)]
 public sealed class CE111SharkAttack(WorldState ws, Actor primary) : BossModule(ws, primary, arena.Center, arena)
 {
     public static readonly WPos ArenaCenter = new(-117f, -850f);

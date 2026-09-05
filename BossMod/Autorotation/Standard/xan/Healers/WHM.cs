@@ -85,7 +85,9 @@ public sealed class WHM(RotationModuleManager manager, Actor player) : Castxan<A
             return;
         }
 
-        GoalZoneCombined(strategy, 25, Hints.GoalAOECircle(8), AID.Holy, 3);
+        var approach = strategy.Assize.Value != AssizeStrategy.None && CanWeave(AID.Assize, 1);
+
+        GoalZoneCombined(strategy, approach ? 19.5f : 25, Hints.GoalAOECircle(8), AID.Holy, 3);
 
         if (!CanFitGCD(TargetDotLeft, 1))
             PushGCD(AID.Aero, BestDotTarget);
@@ -95,11 +97,11 @@ public sealed class WHM(RotationModuleManager manager, Actor player) : Castxan<A
             switch (strategy.Misery.Value)
             {
                 case MiseryStrategy.ASAP:
-                    PushGCD(AID.AfflatusMisery, ResolveTargetOverride(strategy.Misery) ?? BestRangedAOETarget);
+                    PushGCD(AID.AfflatusMisery, ResolveEnemy(strategy.Misery) ?? BestRangedAOETarget);
                     break;
                 case MiseryStrategy.BuffedOnly:
                     if (RaidBuffsLeft > GCD)
-                        PushGCD(AID.AfflatusMisery, ResolveTargetOverride(strategy.Misery) ?? BestRangedAOETarget);
+                        PushGCD(AID.AfflatusMisery, ResolveEnemy(strategy.Misery) ?? BestRangedAOETarget);
                     break;
             }
         }
@@ -125,7 +127,7 @@ public sealed class WHM(RotationModuleManager manager, Actor player) : Castxan<A
         switch (strategy.Assize.Value)
         {
             case AssizeStrategy.HitEverything:
-                if (NumAssizeTargets == Hints.PriorityTargets.Count)
+                if (NumAssizeTargets == Hints.PriorityTargetsSpan.Length)
                     PushOGCD(AID.Assize, Player);
                 break;
             case AssizeStrategy.HitSomething:

@@ -1,4 +1,4 @@
-﻿namespace BossMod.Dawntrail.Advanced.AV1MerchantsTale.Ad012DaryaTheSeamaid;
+﻿namespace BossMod.Dawntrail.Advanced.Ad01TheMerchantsTale.Ad012DaryaTheSeamaid;
 
 sealed class PiercingPlunge(BossModule module) : Components.RaidwideCast(module, (uint)AID.PiercingPlunge);
 sealed class SurgingCurrent(BossModule module) : Components.SimpleAOEs(module, (uint)AID.SurgingCurrent, new AOEShapeCone(60f, 45f.Degrees()));
@@ -422,22 +422,7 @@ sealed class SunkenTreasure(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.WIP,
-StatesType = typeof(Ad012DaryaTheSeamaidStates),
-ConfigType = null, // replace null with typeof(DaryaTheSeaMaidConfig) if applicable
-ObjectIDType = typeof(OID),
-ActionIDType = typeof(AID),
-StatusIDType = typeof(SID),
-TetherIDType = typeof(TetherID),
-IconIDType = typeof(IconID),
-PrimaryActorOID = (uint)OID.DaryaTheSeaMaid,
-Contributors = "",
-Expansion = BossModuleInfo.Expansion.Dawntrail,
-Category = BossModuleInfo.Category.VariantCriterion,
-GroupType = BossModuleInfo.GroupType.CFC,
-GroupID = 1084u,
-NameID = 14291u,
-SortOrder = 2,
-PlanLevel = 0)]
+[ModuleInfo(BossModuleInfo.Maturity.Contributed, PrimaryActorOID = (uint)OID.DaryaTheSeaMaid, Contributors = "", Category = BossModuleInfo.Category.VariantCriterion,
+GroupType = BossModuleInfo.GroupType.CFC, GroupID = 1084u, NameID = 14291u, SortOrder = 2)]
 [SkipLocalsInit]
-public sealed class DaryaTheSeaMaid(WorldState ws, Actor primary) : BossModule(ws, primary, new(375f, 530f), new ArenaBoundsSquare(20f));
+public sealed class Ad012DaryaTheSeamaid(WorldState ws, Actor primary) : BossModule(ws, primary, new(375f, 530f), new ArenaBoundsSquare(20f));

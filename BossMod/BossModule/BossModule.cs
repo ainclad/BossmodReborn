@@ -1,11 +1,10 @@
-﻿using Dalamud.Interface.Utility.Raii;
-using Dalamud.Bindings.ImGui;
+﻿using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility.Raii;
 
 namespace BossMod;
 
 // base for boss modules - provides all the common features, so that look is standardized
 // by default, module activates (transitions to phase 0) whenever "primary" actor becomes both targetable and in combat (this is how we detect 'pull') - though this can be overridden if needed
-[SkipLocalsInit]
 public abstract class BossModule : IDisposable
 {
     public readonly WorldState WorldState;
@@ -18,6 +17,8 @@ public abstract class BossModule : IDisposable
     public readonly bool OnlyLoadIfTargetable;
 
     private readonly EventSubscriptions _subscriptions;
+    private ArenaBoundsCustom? _arenaProjectionLayerOwner;
+    private readonly Dictionary<ulong, int> _actorArenaProjectionLayers = [];
 
     public Event<BossModule, BossComponent?, string> Error = new();
 
@@ -36,7 +37,9 @@ public abstract class BossModule : IDisposable
             foreach (var actor in WorldState.Actors.Actors.Values)
             {
                 if (actor.OID == oid)
+                {
                     entry.Add(actor);
+                }
             }
             RelevantEnemies[oid] = entry;
         }
@@ -70,7 +73,9 @@ public abstract class BossModule : IDisposable
     public virtual Actor? GetDefaultTarget(int slot)
     {
         if (!PrimaryActor.IsDeadOrDestroyed && PrimaryActor.IsTargetable)
+        {
             return PrimaryActor;
+        }
 
         return null;
     }
@@ -98,7 +103,10 @@ public abstract class BossModule : IDisposable
             ReportError(null, $"State {StateMachine.ActiveState?.ID:X}: Activating a component of type {typeof(T)} when another of the same type is already active; old one is deactivated automatically");
             DeactivateComponent<T>();
         }
-        var comp = New<T>.Create(this);
+        if (!GeneratedRegistries.TryCreateBossComponent<T>(this, out var comp))
+        {
+            throw new InvalidOperationException($"Boss component {typeof(T).FullName} was not registered by BossMod.SourceGen");
+        }
         Components.Add(comp);
 
         // execute callbacks for existing state
@@ -159,13 +167,12 @@ public abstract class BossModule : IDisposable
             }
         }
         if (!removed)
+        {
             ReportError(null, $"State {StateMachine.ActiveState?.ID:X}: Could not find a component of type {typeof(T)} to deactivate");
+        }
     }
 
-    public void ClearComponents(Predicate<BossComponent> condition)
-    {
-        Components.RemoveAll(condition);
-    }
+    public void ClearComponents(Predicate<BossComponent> condition) => Components.RemoveAll(condition);
 
     protected BossModule(WorldState ws, Actor primary, WPos center, ArenaBounds bounds, bool onlyLoadIfTargetable = false)
     {
@@ -175,7 +182,7 @@ public abstract class BossModule : IDisposable
         Arena = new(center, bounds);
         OnlyLoadIfTargetable = onlyLoadIfTargetable;
         Info = BossModuleRegistry.FindByOID(primary.OID);
-        StateMachine = Info != null ? ((StateMachineBuilder)Activator.CreateInstance(Info.StatesType, this)!).Build() : new([]);
+        StateMachine = Info?.StateMachineFactory(this) ?? new([]);
 
         _subscriptions = new
         (
@@ -206,7 +213,9 @@ public abstract class BossModule : IDisposable
         );
 
         foreach (var v in WorldState.Actors)
+        {
             OnActorCreated(v);
+        }
     }
 
     public void Dispose()
@@ -226,17 +235,23 @@ public abstract class BossModule : IDisposable
     public void Update()
     {
         if (StateMachine.ActivePhaseIndex < 0 && CheckPull())
+        {
             StateMachine.Start(WorldState.CurrentTime);
+        }
 
         if (StateMachine.ActiveState != null)
+        {
             StateMachine.Update(WorldState.CurrentTime);
+        }
 
         if (StateMachine.ActiveState != null)
         {
             UpdateModule();
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].Update();
+            }
         }
     }
 
@@ -244,23 +259,31 @@ public abstract class BossModule : IDisposable
     {
         var pc = Raid[pcSlot];
         if (pc == null)
+        {
             return;
+        }
 
         var pcHints = CalculateHintsForRaidMember(pcSlot, pc);
         if (includeText)
         {
             if (WindowConfig.ShowMechanicTimers)
+            {
                 StateMachine.Draw();
+            }
 
             if (WindowConfig.ShowGlobalHints)
+            {
                 DrawGlobalHints(CalculateGlobalHints());
+            }
 
             if (WindowConfig.ShowPlayerHints)
+            {
                 DrawPlayerHints(pcHints);
+            }
         }
         if (includeArena)
         {
-            Arena.Begin(cameraAzimuth);
+            Arena.Begin(cameraAzimuth, PrimaryActor, pc);
             var haveRisks = false;
             var count = pcHints.Count;
             for (var i = 0; i < count; ++i)
@@ -272,7 +295,7 @@ public abstract class BossModule : IDisposable
                 }
             }
             DrawArena(pcSlot, pc, haveRisks);
-            MiniArena.End();
+            Arena.End();
         }
     }
 
@@ -283,17 +306,35 @@ public abstract class BossModule : IDisposable
 
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].DrawArenaBackground(pcSlot, pc);
+        }
 
         // draw borders
+        var arenaBorderColor = haveRisks && WindowConfig.ShowBorderRisk ? Colors.Enemy : Colors.Border;
         if (WindowConfig.ShowBorder)
-            Arena.Border(haveRisks && WindowConfig.ShowBorderRisk ? Colors.Enemy : Colors.Border);
+        {
+            Arena.ArenaOutline(arenaBorderColor, 2f);
+        }
+        else if (WindowConfig.ProjectRadarInto3DWorld && WindowConfig.EnableArenaOutlineIn3DWorld && Arena.Bounds.AllowDrawing3DArenaBounds)
+        {
+            Arena.WorldArenaOutline(arenaBorderColor, 2f);
+        }
+
         if (WindowConfig.ShowCardinals)
+        {
             Arena.CardinalNames();
+        }
+
         if (WindowConfig.ShowWaymarks && WorldState.Waymarks.AnyWaymarks)
+        {
             DrawWaymarks();
+        }
+
         if (WindowConfig.ShowSigns)
+        {
             DrawSigns();
+        }
 
         // draw non-player alive party members
         DrawPartyMembers(pcSlot, pc);
@@ -301,14 +342,18 @@ public abstract class BossModule : IDisposable
         // draw foreground
         DrawArenaForeground(pcSlot, pc);
         for (var i = 0; i < count; ++i)
+        {
             Components[i].DrawArenaForeground(pcSlot, pc);
+        }
+
         if (WindowConfig.ShowMeleeRangeIndicator)
         {
             var t = WorldState.Actors.Find(pc.TargetID);
             var actor = t != null && !t.IsAlly && !t.IsDead && t.InCombat ? t : !PrimaryActor.IsDead && PrimaryActor.IsTargetable ? PrimaryActor : null;
             if (actor != null)
             {
-                Arena.ZoneDonut(actor.Position, actor.HitboxRadius + 2.6f, actor.HitboxRadius + 2.9f, Colors.MeleeRangeIndicator);
+                var radius = actor.HitboxRadius;
+                Arena.ZoneDonut(actor.Position, radius + 2.8f, radius + 3f, Colors.MeleeRangeIndicator);
             }
         }
         // draw enemies & player
@@ -321,8 +366,61 @@ public abstract class BossModule : IDisposable
         BossComponent.TextHints hints = [];
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].AddHints(slot, actor, hints);
+        }
+
         return hints;
+    }
+
+    // Resolves an actor's current authored arena floor independently of world-projection settings.
+    // Disjoint layers select by X/Z containment; overlapping floors use Y plus per-actor hysteresis
+    // to prevent jumps near a midpoint from flickering hints, AI restrictions and pathfinding maps.
+    public int? ResolveArenaProjectionLayer(Actor actor)
+    {
+        if (Bounds is not ArenaBoundsCustom { WorldProjectionLayers.Length: > 0 } custom)
+        {
+            _arenaProjectionLayerOwner = null;
+            _actorArenaProjectionLayers.Clear();
+            return null;
+        }
+
+        if (!ReferenceEquals(_arenaProjectionLayerOwner, custom))
+        {
+            _arenaProjectionLayerOwner = custom;
+            _actorArenaProjectionLayers.Clear();
+        }
+
+        if (!_actorArenaProjectionLayers.TryGetValue(actor.InstanceID, out var current))
+        {
+            current = -1;
+        }
+        var resolved = custom.ResolveProjectionLayer(actor.Position - Center, actor.PosRot.Y, current);
+        _actorArenaProjectionLayers[actor.InstanceID] = resolved;
+        return resolved;
+    }
+
+    // A restriction is meaningful only for a valid explicitly authored layer. Null/invalid IDs keep
+    // normal behavior. Grouped physical floors form one 2D/hint/AI visibility domain, allowing remote
+    // teleporter destinations to remain visible and rasterized on their shared map.
+    public bool MechanicAppliesToArenaProjectionLayer(Actor actor, int? mechanicLayer, bool restrictToLayer)
+    {
+        if (!restrictToLayer || Bounds is not ArenaBoundsCustom custom || !custom.IsValidProjectionLayer(mechanicLayer))
+        {
+            return true;
+        }
+        return custom.ProjectionLayersShare2DGroup(ResolveArenaProjectionLayer(actor), mechanicLayer);
+    }
+
+    // Participant selection/counting remains tied to the exact physical floor. This prevents actors
+    // on another island in the same 2D group from becoming bait targets, stack members or tower soakers.
+    public bool ActorMatchesArenaProjectionLayer(Actor actor, int? mechanicLayer, bool restrictToLayer)
+    {
+        if (!restrictToLayer || Bounds is not ArenaBoundsCustom custom || !custom.IsValidProjectionLayer(mechanicLayer))
+        {
+            return true;
+        }
+        return ResolveArenaProjectionLayer(actor) == mechanicLayer;
     }
 
     public BossComponent.MovementHints CalculateMovementHintsForRaidMember(int slot, Actor actor)
@@ -330,7 +428,10 @@ public abstract class BossModule : IDisposable
         BossComponent.MovementHints hints = [];
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].AddMovementHints(slot, actor, hints);
+        }
+
         return hints;
     }
 
@@ -339,7 +440,10 @@ public abstract class BossModule : IDisposable
         BossComponent.GlobalHints hints = [];
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].AddGlobalHints(hints);
+        }
+
         return hints;
     }
 
@@ -347,11 +451,12 @@ public abstract class BossModule : IDisposable
     {
         hints.PathfindMapCenter = Center;
         hints.PathfindMapBounds = Bounds;
+        hints.PathfindMapArenaProjectionLayer = ResolveArenaProjectionLayer(actor);
 
         if (Arena.Bounds.AllowObstacleMap)
         {
             var (entry, bitmap) = Obstacles.Find(new Vector3(Center.X, actor.PosRot.Y, Center.Z));
-            if (entry != null && bitmap != null)
+            if (entry != null && bitmap != null && bitmap.PixelSize == Bounds.MapResolution)
             {
                 var originCell = (Center - entry.Origin) / bitmap.PixelSize;
                 var originX = (int)originCell.X;
@@ -362,10 +467,15 @@ public abstract class BossModule : IDisposable
         }
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].AddAIHints(slot, actor, assignment, hints);
+        }
+
         CalculateModuleAIHints(slot, actor, assignment, hints);
         if (!WindowConfig.AllowAutomaticActions && AI.AIManager.Instance?.Beh == null && Autorotation.MiscAI.NormalMovement.Instance == null)
+        {
             hints.ActionsToExecute.Clear();
+        }
     }
 
     public void ReportError(BossComponent? comp, string message)
@@ -392,7 +502,7 @@ public abstract class BossModule : IDisposable
     protected virtual void UpdateModule() { }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected Actor? GetActor(uint enemy)
+    internal Actor? GetActor(uint enemy)
     {
         var b = Enemies(enemy);
         return b.Count != 0 ? b[0] : null;
@@ -500,7 +610,7 @@ public abstract class BossModule : IDisposable
     public static List<Actor> GetActiveActors(List<Actor> enemy)
     {
         var count = enemy.Count;
-        List<Actor> actors = new(count);
+        List<Actor> actors = [with(count)];
         for (var i = 0; i < count; ++i)
         {
             var e = enemy[i];
@@ -517,10 +627,7 @@ public abstract class BossModule : IDisposable
     protected virtual void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }
 
     // called at the very end to draw important enemies, default implementation draws primary actor
-    protected virtual void DrawEnemies(int pcSlot, Actor pc)
-    {
-        Arena.Actor(PrimaryActor);
-    }
+    protected virtual void DrawEnemies(int pcSlot, Actor pc) => Arena.Actor(PrimaryActor);
 
     private void DrawGlobalHints(BossComponent.GlobalHints hints)
     {
@@ -549,6 +656,10 @@ public abstract class BossModule : IDisposable
 
     private void DrawWaymarks()
     {
+        var fontsize = WindowConfig.WaymarkFontSize;
+        var showOutlines = WindowConfig.ShowOutlinesAndShadows;
+        var shadows = showOutlines ? Colors.Shadows : 0u;
+        var outlinewidth = showOutlines ? 1.5f : 0f;
         DrawWaymark(WorldState.Waymarks[Waymark.A], "A", Colors.WaymarkA);
         DrawWaymark(WorldState.Waymarks[Waymark.B], "B", Colors.WaymarkB);
         DrawWaymark(WorldState.Waymarks[Waymark.C], "C", Colors.WaymarkC);
@@ -564,11 +675,7 @@ public abstract class BossModule : IDisposable
             if (position?.XZ() is Vector2 vec2)
             {
                 WPos pos = new(vec2);
-                if (WindowConfig.ShowOutlinesAndShadows)
-                {
-                    Arena.TextWorld(pos, text, Colors.Shadows, WindowConfig.WaymarkFontSize + 3f);
-                }
-                Arena.TextWorld(pos, text, color, WindowConfig.WaymarkFontSize);
+                Arena.TextWorld(pos, text, color, fontsize, shadows, outlinewidth);
             }
         }
     }
@@ -579,7 +686,9 @@ public abstract class BossModule : IDisposable
         {
             var actor = WorldState.Actors.Find(WorldState.Waymarks[i]);
             if (actor == null)
+            {
                 continue;
+            }
 
             var iconId = i.IconId();
             if (Service.Texture.TryGetFromGameIcon(iconId, out var tex))
@@ -588,7 +697,7 @@ public abstract class BossModule : IDisposable
                 var pos = Arena.WorldPositionToScreenPosition(actor.Position);
                 var scale = WindowConfig.ArenaScale * 24f;
 
-                ImGui.GetWindowDrawList().AddImage(wrap.Handle, pos - new Vector2(scale), pos);
+                Arena.SpriteScreen(pos - new Vector2(scale), pos, wrap);
             }
         }
     }
@@ -601,12 +710,17 @@ public abstract class BossModule : IDisposable
         {
             var (slot, player) = raid[i];
             if (slot == pcSlot)
+            {
                 continue;
+            }
+
             var (prio, color) = CalculateHighestPriority(pcSlot, pc, slot, player);
 
             var isFocus = WorldState.Client.FocusTargetId == player.InstanceID;
             if (prio == BossComponent.PlayerPriority.Irrelevant && !WindowConfig.ShowIrrelevantPlayers && !(isFocus && WindowConfig.ShowFocusTargetPlayer))
+            {
                 continue;
+            }
 
             if (color == 0)
             {
@@ -669,7 +783,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnActorCreated(actor);
+            }
         }
     }
 
@@ -680,7 +796,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnActorDestroyed(actor);
+            }
         }
     }
 
@@ -690,7 +808,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnCastStarted(actor, actor.CastInfo);
+            }
         }
     }
 
@@ -700,7 +820,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnCastFinished(actor, actor.CastInfo);
+            }
         }
     }
 
@@ -710,13 +832,17 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnActorTargetable(actor);
+            }
         }
         else
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnActorUntargetable(actor);
+            }
         }
     }
 
@@ -726,7 +852,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnActorDeath(actor);
+            }
         }
     }
 
@@ -736,7 +864,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnActorRenderflagsChange(actor, actor.Renderflags);
+            }
         }
     }
 
@@ -744,14 +874,18 @@ public abstract class BossModule : IDisposable
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnTethered(actor, actor.Tether);
+        }
     }
 
     private void OnActorUntethered(Actor actor)
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnUntethered(actor, actor.Tether);
+        }
     }
 
     private void OnActorStatusGain(Actor actor, int index)
@@ -760,7 +894,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnStatusGain(actor, ref actor.Statuses[index]);
+            }
         }
     }
 
@@ -770,7 +906,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnStatusLose(actor, ref actor.Statuses[index]);
+            }
         }
     }
 
@@ -778,14 +916,18 @@ public abstract class BossModule : IDisposable
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnEventIcon(actor, iconID, targetID);
+        }
     }
 
     private void OnActorVFX(Actor actor, uint vfxID, ulong targetID)
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnEventVFX(actor, vfxID, targetID);
+        }
     }
 
     private void OnActorCastEvent(Actor actor, ActorCastEvent cast)
@@ -794,7 +936,9 @@ public abstract class BossModule : IDisposable
         {
             var count = Components.Count;
             for (var i = 0; i < count; ++i)
+            {
                 Components[i].OnEventCast(actor, cast);
+            }
         }
     }
 
@@ -802,7 +946,9 @@ public abstract class BossModule : IDisposable
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnActorEState(actor, state);
+        }
     }
 
     private void OnActorEAnim(Actor actor, ushort p1, ushort p2)
@@ -810,28 +956,36 @@ public abstract class BossModule : IDisposable
         var state = ((uint)p1 << 16) | p2;
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnActorEAnim(actor, state);
+        }
     }
 
     private void OnActorPlayActionTimelineEvent(Actor actor, ushort id)
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnActorPlayActionTimelineEvent(actor, id);
+        }
     }
 
     private void OnActorPlayActionTimelineSync(Actor actor, List<(ulong, ushort)> events)
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnActorPlayActionTimelineSync(actor, events);
+        }
     }
 
     private void OnActorNpcYell(Actor actor, ushort id)
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnActorNpcYell(actor, id);
+        }
     }
 
     private void OnActorModelStateChange(Actor actor)
@@ -851,27 +1005,56 @@ public abstract class BossModule : IDisposable
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnActorEventStateChange(actor, actor.EventState);
+        }
     }
 
     private void OnMapEffect(WorldState.OpMapEffect op)
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnMapEffect(op.Index, op.State);
+        }
     }
 
     private void OnLegacyMapEffect(WorldState.OpLegacyMapEffect op)
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnLegacyMapEffect(op.Sequence, op.Param, op.Data);
+        }
     }
 
     private void OnDirectorUpdate(WorldState.OpDirectorUpdate op)
     {
         var count = Components.Count;
         for (var i = 0; i < count; ++i)
+        {
             Components[i].OnEventDirectorUpdate(op.UpdateID, op.Param1, op.Param2, op.Param3, op.Param4);
+        }
+    }
+
+    public void DrawWorldProjection(Angle cameraAzimuth, int pcSlot)
+    {
+        var pc = Raid[pcSlot];
+        if (pc == null)
+        {
+            return;
+        }
+
+        var hints = CalculateHintsForRaidMember(pcSlot, pc);
+        var haveRisks = false;
+        var count = hints.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            haveRisks |= hints[i].Item2;
+        }
+
+        Arena.Begin(cameraAzimuth, PrimaryActor, pc, draw2D: false);
+        DrawArena(pcSlot, pc, haveRisks);
+        Arena.End();
     }
 }

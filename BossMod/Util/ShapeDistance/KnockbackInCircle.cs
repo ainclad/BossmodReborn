@@ -106,10 +106,7 @@ public sealed class SDKnockbackInCircleFixedDirection(WPos Center, WDir Directio
     private readonly float radius = Radius;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override bool Contains(in WPos p)
-    {
-        return !(p + direction).InCircle(center, radius);
-    }
+    public override bool Contains(in WPos p) => !(p + direction).InCircle(center, radius);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
@@ -171,10 +168,7 @@ public sealed class SDKnockbackInCircleFixedDirectionAndAwayFromOrigin(WPos Cent
     private readonly float distance = Distance; // distance for the away from origin kb
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override bool Contains(in WPos p)
-    {
-        return !(p + direction).InCircle(center, radius) || !(p + distance * (p - origin).Normalized()).InCircle(center, radius);
-    }
+    public override bool Contains(in WPos p) => !(p + direction).InCircle(center, radius) || !(p + distance * (p - origin).Normalized()).InCircle(center, radius);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
@@ -316,10 +310,7 @@ public sealed class SDKnockbackFixedDirectionIntoCircle(WDir Direction, WPos Cir
     private readonly float radius = Radius;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override bool Contains(in WPos p)
-    {
-        return !(p + direction).InCircle(circleOrigin, radius);
-    }
+    public override bool Contains(in WPos p) => !(p + direction).InCircle(circleOrigin, radius);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
@@ -375,6 +366,35 @@ public sealed class SDKnockbackInCircleLeftRightAlongXAxis(WPos Center, float Di
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override bool RowIntersectsShape(WPos rowStart, WDir dx, float width, float cushion = default) => true;
+}
+
+[SkipLocalsInit]
+public sealed class SDKnockbackInCircleAwayFromOriginIntoCircle(WPos Center, WPos Origin, float Distance, float Radius, WPos CircleOrigin, float CircleRadius) : ShapeDistance
+{
+    private readonly WPos center = Center;
+    private readonly WPos origin = Origin;
+    private readonly float radius = Radius;
+    private readonly float distance = Distance;
+    private readonly WPos circleOrigin = CircleOrigin;
+    private readonly float circleRadius = CircleRadius;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override bool Contains(in WPos p)
+    {
+        var projected = p + distance * (p - origin).Normalized();
+        if (!projected.InCircle(center, radius))
+        {
+            return true;
+        }
+        return !projected.InCircle(circleOrigin, circleRadius);
+
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override bool RowIntersectsShape(WPos rowStart, WDir dx, float width, float cushion = default) => true;

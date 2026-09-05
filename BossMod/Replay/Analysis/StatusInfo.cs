@@ -30,7 +30,10 @@ sealed class StatusInfo : CommonEnumInfo
                 {
                     var data = _data.GetOrAdd(status.ID);
                     if (status.Source != null)
+                    {
                         data.SourceOIDs.Add(status.Source.OID);
+                    }
+
                     data.TargetOIDs.Add(status.Target.OID);
                     data.Extras.Add(status.StartingExtra);
                     data.Instances.Add(new(replay, status));
@@ -43,7 +46,7 @@ sealed class StatusInfo : CommonEnumInfo
     {
         UITree.NodeProperties map(KeyValuePair<uint, StatusData> kv)
         {
-            var name = _sidType?.GetEnumName(kv.Key);
+            var name = _sidType?.GeneratedEnumName(kv.Key);
             return new($"{Utils.StatusString(kv.Key)} ({name})", false, name == null ? Colors.TextColor2 : Colors.TextColor1);
         }
         foreach (var (sid, data) in tree.Nodes(_data, map))
@@ -64,7 +67,10 @@ sealed class StatusInfo : CommonEnumInfo
         {
             var sb = new StringBuilder("public enum SID : uint\n{\n");
             foreach (var (sid, data) in _data)
+            {
                 sb.Append($"    {EnumMemberString(sid, data)}\n");
+            }
+
             sb.Append("\n}\n");
             ImGui.SetClipboardText(sb.ToString());
         }
@@ -72,15 +78,18 @@ sealed class StatusInfo : CommonEnumInfo
         if (ImGui.MenuItem("Generate missing enum values for boss module"))
         {
             var sb = new StringBuilder();
-            foreach (var (sid, data) in _data.Where(kv => _sidType?.GetEnumName(kv.Key) == null))
+            foreach (var (sid, data) in _data.Where(kv => _sidType?.GeneratedEnumName(kv.Key) == null))
+            {
                 sb.AppendLine(EnumMemberString(sid, data));
+            }
+
             ImGui.SetClipboardText(sb.ToString());
         }
     }
 
     private string EnumMemberString(uint sid, StatusData data)
     {
-        var name = _sidType?.GetEnumName(sid) ?? $"_Gen_{Utils.StringToIdentifier(Service.LuminaRow<Lumina.Excel.Sheets.Status>(sid)?.Name.ToString() ?? $"Status{sid}")}";
+        var name = _sidType?.GeneratedEnumName(sid) ?? $"_Gen_{Utils.StringToIdentifier(Service.LuminaRow<Lumina.Excel.Sheets.Status>(sid)?.Name.ToString() ?? $"Status{sid}")}";
         return $"{name} = {sid}, // {OIDListString(data.SourceOIDs)}->{OIDListString(data.TargetOIDs)}, extra={JoinStrings(data.Extras.Select(extra => $"0x{extra:X}"))}";
     }
 }

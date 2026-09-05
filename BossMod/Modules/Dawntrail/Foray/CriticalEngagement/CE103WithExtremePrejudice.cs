@@ -37,7 +37,7 @@ sealed class AethericBurst(BossModule module) : Components.RaidwideCast(module, 
 
 sealed class RockSlideStoneSwell(BossModule module) : Components.GenericAOEs(module)
 {
-    private readonly List<AOEInstance> _aoes = new(6);
+    private readonly List<AOEInstance> _aoes = [with(6)];
     private static readonly AOEShapeCircle circle = new(16f);
     private static readonly AOEShapeCross cross = new(40f, 5f);
 
@@ -123,7 +123,7 @@ sealed class CE103WithExtremePrejudiceStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018, NameID = 43)]
+[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018u, NameID = 43u)]
 public sealed class CE103WithExtremePrejudice(WorldState ws, Actor primary) : BossModule(ws, primary, arena.Center, arena)
 {
     private static readonly ArenaBoundsCustom arena = new([new Polygon(new(-352f, -608f), 19.5f, 32)]);

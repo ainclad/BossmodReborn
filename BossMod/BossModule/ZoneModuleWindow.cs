@@ -1,9 +1,8 @@
-﻿using Dalamud.Utility;
-using Dalamud.Bindings.ImGui;
+﻿using Dalamud.Bindings.ImGui;
+using Dalamud.Utility;
 
 namespace BossMod;
 
-[SkipLocalsInit]
 public sealed class ZoneModuleWindow : UIWindow
 {
     private static readonly ZoneModuleConfig config = Service.Config.Get<ZoneModuleConfig>();
@@ -45,11 +44,10 @@ public sealed class ZoneModuleWindow : UIWindow
     {
         // user closed window
         if (_wasOpen && !IsOpen)
+        {
             _zmm.ActiveModule?.OnWindowClose();
+        }
     }
 
-    public override void Draw()
-    {
-        _zmm.ActiveModule?.DrawExtra();
-    }
+    public override void Draw() => _zmm.ActiveModule?.DrawExtra();
 }

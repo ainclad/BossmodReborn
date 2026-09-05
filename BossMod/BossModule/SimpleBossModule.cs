@@ -2,7 +2,8 @@
 
 // base class for simple boss modules (hunts, fates, dungeons, etc.)
 // these always center map around PC
-public abstract class SimpleBossModule(WorldState ws, Actor primary) : BossModule(ws, primary, primary.Position, new ArenaBoundsCircle(30f, AllowObstacleMap: true))
+public abstract class SimpleBossModule(WorldState ws, Actor primary) : BossModule(ws, primary, primary.Position,
+    new ArenaBoundsCircle(30f, AllowObstacleMap: true, AllowDrawing3DArenaBounds: false) { WorldProjectionHeight = 10f })
 {
     private WPos _prevFramePathfindCenter;
 
@@ -14,7 +15,9 @@ public abstract class SimpleBossModule(WorldState ws, Actor primary) : BossModul
         // we don't want to change pathfinding map origin every time player slightly moves, it makes movement jittery
         // instead, (a) quantize origin and (b) only update it when player moves sufficiently far away
         if (!_prevFramePathfindCenter.AlmostEqual(Arena.Center, 5f))
+        {
             _prevFramePathfindCenter = Arena.Center.Rounded();
+        }
     }
 
     protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
@@ -22,4 +25,11 @@ public abstract class SimpleBossModule(WorldState ws, Actor primary) : BossModul
         hints.PathfindMapCenter = _prevFramePathfindCenter;
         hints.PathfindMapBounds = AIHints.DefaultBounds;
     }
+}
+
+public abstract class OpenWorldFate(WorldState ws, Actor primary) : SimpleBossModule(ws, primary)
+{
+    // only activate module when close and deactivate it if player leaves area
+    protected override bool CheckPull() => base.CheckPull() && Raid.Player()!.Position.InCircle(Arena.Center, 30f);
+    public override bool CheckReset() => base.CheckReset() || !Raid.Player()!.Position.InCircle(Arena.Center, 40f);
 }

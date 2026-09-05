@@ -6,12 +6,36 @@ namespace BossMod;
 
 public sealed class ReplayRecorder : IDisposable
 {
-    public const int Version = 29;
+    public const int Version = 31;
+
+    // approach copied from https://stackoverflow.com/a/2565861
+    // we don't care about reversing this "encryption" step; all we care about is that each unique ContentID is mapped to a unique "random" ContentID
+    // this is required for role assignment to work in anonymized replays (i.e. if we returned a constant instead, everyone would get the same role)
+    private class IdAnonymizer
+    {
+        readonly byte[] table = [.. Enumerable.Range(0, 256).Shuffle().Select(i => (byte)i)];
+
+        public ulong Hide(ulong id)
+        {
+            var plain = BitConverter.GetBytes(id);
+            var cx = new byte[plain.Length];
+            var c = 0;
+            for (var i = 0; i < plain.Length; i++)
+            {
+                c = table[plain[i] ^ c];
+                cx[i] = (byte)c;
+            }
+            return BitConverter.ToUInt64(cx);
+        }
+    }
     public uint CFCID;
     public string LogPath;
 
     public abstract class Output : IDisposable
     {
+        public bool Anonymous { get; set; }
+        private readonly IdAnonymizer _anonymizer = new();
+
         public void Dispose()
         {
             Dispose(true);
@@ -44,6 +68,27 @@ public sealed class ReplayRecorder : IDisposable
         public abstract Output Emit(List<ActorCastEvent.Target> v);
         public abstract Output EmitFloatPair(float t1, float t2);
         public abstract Output EmitActor(ulong instanceID);
+
+        public Output EmitName(string name, ActorType Type, Class klass, int level)
+        {
+            if (Anonymous && Type == ActorType.Player)
+            {
+                var fakeName = ModuleViewer.FixCase(Service.LuminaRow<Lumina.Excel.Sheets.ClassJob>((byte)klass)!.Value.Name);
+                if (fakeName.Length == 0)
+                    fakeName = "Adventurer";
+                return Emit($"{fakeName} L{level}");
+            }
+
+            return Emit(name);
+        }
+
+        public Output EmitContentID(ulong contentID)
+        {
+            if (Anonymous)
+                contentID = _anonymizer.Hide(contentID);
+            return Emit(contentID, "X");
+        }
+
         public abstract void EndEntry();
         public abstract void Flush();
 
@@ -81,7 +126,10 @@ public sealed class ReplayRecorder : IDisposable
         {
             _dest.Write('|');
             foreach (var b in v)
+            {
                 _dest.Write($"{b:X2}");
+            }
+
             return this;
         }
         public override Output Emit(ActionID v) => WriteEntry(v.ToString());
@@ -89,8 +137,11 @@ public sealed class ReplayRecorder : IDisposable
         public override Output Emit(ActorStatus v) => WriteEntry(Utils.StatusString(v.ID)).WriteEntry(v.Extra.ToString("X4")).WriteEntry(Utils.StatusTimeString(v.ExpireAt, _curEntry)).EmitActor(v.SourceID);
         public override Output Emit(in ActionEffects v)
         {
-            for (int i = 0; i < ActionEffects.MaxCount; ++i)
+            for (var i = 0; i < ActionEffects.MaxCount; ++i)
+            {
                 Emit(v[i], "X16");
+            }
+
             return this;
         }
         public override Output Emit(List<ActorCastEvent.Target> v)
@@ -99,8 +150,12 @@ public sealed class ReplayRecorder : IDisposable
             {
                 EmitActor(t.ID);
                 for (var i = 0; i < ActionEffects.MaxCount; ++i)
+                {
                     if (t.Effects[i] != 0)
+                    {
                         _dest.Write($"!{t.Effects[i]:X16}");
+                    }
+                }
             }
             return this;
         }
@@ -238,7 +293,10 @@ public sealed class ReplayRecorder : IDisposable
         public override Output Emit(in ActionEffects v)
         {
             for (var i = 0; i < ActionEffects.MaxCount; ++i)
+            {
                 _dest.Write(v[i]);
+            }
+
             return this;
         }
         public override Output Emit(List<ActorCastEvent.Target> v)
@@ -248,7 +306,9 @@ public sealed class ReplayRecorder : IDisposable
             {
                 _dest.Write(t.ID);
                 for (var i = 0; i < ActionEffects.MaxCount; ++i)
+                {
                     _dest.Write(t.Effects[i]);
+                }
             }
             return this;
         }
@@ -271,7 +331,7 @@ public sealed class ReplayRecorder : IDisposable
     private readonly Output _logger;
     private readonly EventSubscription _subscription;
 
-    public ReplayRecorder(WorldState ws, ReplayLogFormat format, bool logInitialState, DirectoryInfo targetDirectory, string logPrefix)
+    public ReplayRecorder(WorldState ws, ReplayLogFormat format, bool logInitialState, DirectoryInfo targetDirectory, string logPrefix, bool anon)
     {
         _ws = ws;
         CFCID = _ws.CurrentCFCID;
@@ -298,11 +358,16 @@ public sealed class ReplayRecorder : IDisposable
                 throw new InvalidEnumArgumentException("Bad format");
         }
 
+        _logger.Anonymous = anon;
+
         // log initial state
         _logger.StartEntry(_ws.CurrentTime);
         _logger.EmitFourCC("VER "u8).Emit(Version).Emit(_ws.QPF).Emit(_ws.GameVersion);
         if (_logger is BinaryOutput)
+        {
             _logger.Emit(_ws.CurrentTime.Ticks);
+        }
+
         _logger.EndEntry();
         if (logInitialState)
         {

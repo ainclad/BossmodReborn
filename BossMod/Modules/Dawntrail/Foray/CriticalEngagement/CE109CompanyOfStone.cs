@@ -68,7 +68,7 @@ sealed class KnuckleCrusher : Components.SimpleAOEs
     {
         if (midpoint != default && NumCasts < 2)
         {
-            Arena.AddCircle(midpoint, 2f, Colors.Safe, 2f);
+            Arena.ZoneCircleOutline(midpoint, 2f, Colors.Safe, 2f);
         }
     }
 
@@ -164,7 +164,7 @@ sealed class SpinningSiege(BossModule module) : Components.GenericRotatingAOE(mo
     {
         if (Sequences.Count == 4 && NumCasts < 20)
         {
-            Arena.AddCircle(midpoint, 4f, Colors.Safe, 2f);
+            Arena.ZoneCircleOutline(midpoint, 4f, Colors.Safe, 2f);
         }
     }
 
@@ -314,7 +314,7 @@ sealed class CE109CompanyOfStoneStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018, NameID = 40)]
+[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018u, NameID = 40u)]
 public sealed class CE109CompanyOfStone(WorldState ws, Actor primary) : BossModule(ws, primary, new WPos(680f, -280f).Quantized(), new ArenaBoundsCircle(20f))
 {
     public Actor? BossMegaloknight;

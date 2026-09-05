@@ -41,7 +41,7 @@ sealed class ChocoSlaughter(BossModule module) : Components.SimpleExaflare(modul
 
 sealed class ChocoBeak(BossModule module) : Components.GenericAOEs(module)
 {
-    private readonly List<AOEInstance> _aoes = new(12);
+    private readonly List<AOEInstance> _aoes = [with(12)];
     private static readonly AOEShapeRect rect = new(50f, 2f);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(_aoes);
@@ -108,7 +108,7 @@ sealed class CE101BlackRegimentStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018, NameID = 34)]
+[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018u, NameID = 34u)]
 public sealed class CE101BlackRegiment(WorldState ws, Actor primary) : BossModule(ws, primary, new(450f, 357f), new ArenaBoundsSquare(20f))
 {
     public static readonly uint[] Trash = [(uint)OID.Boss, (uint)OID.BlackChocobo2, (uint)OID.BlackChocobo4];

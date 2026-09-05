@@ -3,11 +3,9 @@
 // generic component for mechanics that require baiting some aoe (by proximity, by tether, etc) away from raid
 // some players can be marked as 'forbidden' - if any of them is baiting, they are warned
 // otherwise we show own bait as as outline (and warn if player is clipping someone) and other baits as filled (and warn if player is being clipped)
-
-[SkipLocalsInit]
 public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysDrawOtherBaits = true, bool centerAtTarget = false, bool tankbuster = false, bool onlyShowOutlines = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.None) : CastCounter(module, aid)
 {
-    public struct Bait(Actor source, Actor target, AOEShape shape, DateTime activation = default, BitMask forbidden = default, Angle? customRotation = null, int maxCasts = 1, WDir offset = default)
+    public struct Bait(Actor source, Actor target, AOEShape shape, DateTime activation = default, BitMask forbidden = default, Angle? customRotation = null, int maxCasts = 1, WDir offset = default, int? arenaProjectionLayer = null, bool restrictToArenaProjectionLayer = false)
     {
         public Angle? CustomRotation = customRotation;
         public AOEShape Shape = shape;
@@ -17,11 +15,13 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
         public BitMask Forbidden = forbidden;
         public int MaxCasts = maxCasts;
         public WDir Offset = offset;
+        public int? ArenaProjectionLayer = arenaProjectionLayer;
+        public bool RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
 
         public readonly Angle Rotation => CustomRotation ?? (Source != Target ? Angle.FromDirection(Target.Position - Source.Position) : Source.Rotation);
 
-        public Bait(WPos source, Actor target, AOEShape shape, DateTime activation = default, Angle? customRotation = null, BitMask forbidden = default, int maxCasts = 1, WDir offset = default)
-            : this(new(default, default, default, default, default!, default, default, default, default, source.ToVec4()), target, shape, activation, forbidden, customRotation, maxCasts, offset) { }
+        public Bait(WPos source, Actor target, AOEShape shape, DateTime activation = default, Angle? customRotation = null, BitMask forbidden = default, int maxCasts = 1, WDir offset = default, int? arenaProjectionLayer = null, bool restrictToArenaProjectionLayer = false)
+            : this(new(default, default, default, default, default!, default, default, default, default, source.ToVec4()), target, shape, activation, forbidden, customRotation, maxCasts, offset, arenaProjectionLayer, restrictToArenaProjectionLayer) { }
     }
 
     public readonly bool AlwaysDrawOtherBaits = alwaysDrawOtherBaits; // if false, other baits are drawn only if they are clipping a player
@@ -45,7 +45,7 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
             {
                 return CurrentBaits;
             }
-            List<Bait> activeBaits = new(count);
+            List<Bait> activeBaits = [with(count)];
             var curBaits = CollectionsMarshal.AsSpan(CurrentBaits);
             for (var i = 0; i < count; ++i)
             {
@@ -69,12 +69,12 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
         {
             return CurrentBaits;
         }
-        List<Bait> activeBaitsOnTarget = new(count);
+        List<Bait> activeBaitsOnTarget = [with(count)];
         var curBaits = CollectionsMarshal.AsSpan(CurrentBaits);
         for (var i = 0; i < count; ++i)
         {
             ref var bait = ref curBaits[i];
-            if (!bait.Source.IsDead && bait.Target == target)
+            if (!bait.Source.IsDead && bait.Target == target && BaitParticipantAppliesToArenaProjectionLayer(target, bait))
             {
                 activeBaitsOnTarget.Add(bait);
             }
@@ -94,7 +94,7 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
         for (var i = 0; i < count; ++i)
         {
             ref var bait = ref curBaits[i];
-            if (!bait.Source.IsDead && bait.Target == target)
+            if (!bait.Source.IsDead && bait.Target == target && BaitParticipantAppliesToArenaProjectionLayer(target, bait))
             {
                 return true;
             }
@@ -109,13 +109,13 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
         {
             return CurrentBaits;
         }
-        List<Bait> activeBaitsNotOnTarget = new(count);
+        List<Bait> activeBaitsNotOnTarget = [with(count)];
         var curBaits = CollectionsMarshal.AsSpan(CurrentBaits);
 
         for (var i = 0; i < count; ++i)
         {
             ref var bait = ref curBaits[i];
-            if (!bait.Source.IsDead && bait.Target != target)
+            if (!bait.Source.IsDead && bait.Target != target && BaitAppliesToArenaProjectionLayer(target, bait))
             {
                 activeBaitsNotOnTarget.Add(bait);
             }
@@ -125,17 +125,25 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
 
     public WPos BaitOrigin(ref Bait bait) => (CenterAtTarget ? bait.Target : bait.Source).Position + bait.Offset;
     public bool IsClippedBy(Actor actor, ref Bait bait) => bait.Shape.Check(actor.Position, BaitOrigin(ref bait), bait.Rotation);
+    protected bool BaitAppliesToArenaProjectionLayer(Actor actor, in Bait bait)
+        => ArenaProjectionLayerApplies(actor, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer);
+    protected bool BaitParticipantAppliesToArenaProjectionLayer(Actor actor, in Bait bait)
+        => ArenaProjectionLayerParticipantApplies(actor, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer);
+
     public List<Actor> PlayersClippedBy(ref Bait bait)
     {
         var actors = Raid.WithoutSlot();
         var len = actors.Length;
-        List<Actor> result = new(len);
+        List<Actor> result = [with(len)];
         for (var i = 0; i < len; ++i)
         {
             var actor = actors[i];
-            var id = actor.InstanceID;
-            if (id != bait.Target.InstanceID && bait.Shape.Check(actor.Position, BaitOrigin(ref bait), bait.Rotation))
+            if (actor != bait.Target
+                && Module.ActorMatchesArenaProjectionLayer(actor, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer)
+                && bait.Shape.Check(actor.Position, BaitOrigin(ref bait), bait.Rotation))
+            {
                 result.Add(actor);
+            }
         }
 
         return result;
@@ -144,26 +152,39 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
     public override void AddHints(int slot, Actor actor, TextHints hints)
     {
         if (!EnableHints)
+        {
             return;
+        }
+
         var baits = CollectionsMarshal.AsSpan(ActiveBaits);
         var count = baits.Length;
         if (count == 0)
+        {
             return;
+        }
+
         if (ForbiddenPlayers[slot])
         {
-            if (IsBaitTarget(actor))
+            for (var i = 0; i < count; ++i)
             {
-                hints.Add("Avoid baiting!");
+                ref var bait = ref baits[i];
+                if (bait.Target == actor && BaitAppliesToArenaProjectionLayer(actor, bait) && BaitParticipantAppliesToArenaProjectionLayer(actor, bait))
+                {
+                    hints.Add("Avoid baiting!");
+                    break;
+                }
             }
         }
         else
         {
-            var id = actor.InstanceID;
             for (var i = 0; i < count; ++i)
             {
                 ref var bait = ref baits[i];
-                if (bait.Target.InstanceID != id)
+                if (bait.Target != actor || !BaitAppliesToArenaProjectionLayer(actor, bait) || !BaitParticipantAppliesToArenaProjectionLayer(actor, bait))
+                {
                     continue;
+                }
+
                 var clippedPlayers = PlayersClippedBy(ref bait);
                 if (clippedPlayers.Count != 0)
                 {
@@ -175,12 +196,14 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
 
         if (!IgnoreOtherBaits)
         {
-            var id = actor.InstanceID;
             for (var i = 0; i < count; ++i)
             {
                 ref var bait = ref baits[i];
-                if (bait.Target.InstanceID == id)
+                if (bait.Target == actor || !BaitParticipantAppliesToArenaProjectionLayer(actor, bait))
+                {
                     continue;
+                }
+
                 if (IsClippedBy(actor, ref bait))
                 {
                     hints.Add("GTFO from baited aoe!");
@@ -199,25 +222,33 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
             return;
         }
         BitMask predictedDamage = default;
+        var firstActivation = DateTime.MaxValue;
         for (var i = 0; i < count; ++i)
         {
             ref var bait = ref baits[i];
-            if (bait.Target != actor)
+            if (!BaitAppliesToArenaProjectionLayer(actor, bait))
             {
-                hints.AddForbiddenZone(bait.Shape, BaitOrigin(ref bait), bait.Rotation, bait.Activation);
+                continue;
+            }
+            if (bait.Target != actor || !BaitParticipantAppliesToArenaProjectionLayer(actor, bait))
+            {
+                hints.AddForbiddenZone(bait.Shape, BaitOrigin(ref bait), bait.Rotation, bait.Activation,
+                    arenaProjectionLayer: bait.ArenaProjectionLayer);
             }
             else
             {
                 AddTargetSpecificHints(actor, ref bait, hints);
             }
-            if (DamageType != AIHints.PredictedDamageType.None)
+            if (DamageType != AIHints.PredictedDamageType.None
+                && Module.ActorMatchesArenaProjectionLayer(bait.Target, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer))
             {
                 predictedDamage.Set(Raid.FindSlot(bait.Target.InstanceID));
+                firstActivation = firstActivation < bait.Activation ? firstActivation : bait.Activation;
             }
         }
         if (predictedDamage != default)
         {
-            hints.AddPredictedDamage(predictedDamage, CurrentBaits.Ref(0).Activation, DamageType);
+            hints.AddPredictedDamage(predictedDamage, firstActivation, DamageType);
         }
     }
 
@@ -232,7 +263,7 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
         for (var i = 0; i < len; ++i)
         {
             var a = raid[i];
-            if (a == actor)
+            if (a == actor || !Module.ActorMatchesArenaProjectionLayer(a, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer))
             {
                 continue;
             }
@@ -240,37 +271,57 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
             {
                 case AOEShapeDonut:
                 case AOEShapeCircle:
-                    hints.AddForbiddenZone(bait.Shape, a.Position - bait.Offset, default, bait.Activation);
+                    hints.AddForbiddenZone(bait.Shape, a.Position - bait.Offset, default, bait.Activation,
+                        arenaProjectionLayer: bait.ArenaProjectionLayer);
                     break;
                 case AOEShapeCone cone:
-                    hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), cone.HalfAngle), bait.Activation);
+                    hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), cone.HalfAngle), bait.Activation,
+                        arenaProjectionLayer: bait.ArenaProjectionLayer);
                     break;
                 case AOEShapeRect rect:
-                    hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), Angle.Asin(rect.HalfWidth / (a.Position - bait.Source.Position).Length())), bait.Activation);
+                    hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), Angle.Asin(rect.HalfWidth / (a.Position - bait.Source.Position).Length())), bait.Activation,
+                        arenaProjectionLayer: bait.ArenaProjectionLayer);
                     break;
                 case AOEShapeCross cross:
-                    hints.AddForbiddenZone(cross, a.Position - bait.Offset, bait.Rotation, bait.Activation);
+                    hints.AddForbiddenZone(cross, a.Position - bait.Offset, bait.Rotation, bait.Activation,
+                        arenaProjectionLayer: bait.ArenaProjectionLayer);
                     break;
             }
         }
     }
 
-    public override PlayerPriority CalcPriority(int pcSlot, Actor pc, int playerSlot, Actor player, ref uint customColor) => ActiveBaitsOn(player).Count != 0 ? BaiterPriority : PlayerPriority.Irrelevant;
+    public override PlayerPriority CalcPriority(int pcSlot, Actor pc, int playerSlot, Actor player, ref uint customColor)
+    {
+        var baits = CollectionsMarshal.AsSpan(CurrentBaits);
+        var len = baits.Length;
+        for (var i = 0; i < len; ++i)
+        {
+            ref var bait = ref baits[i];
+            if (!bait.Source.IsDead && bait.Target == player && BaitAppliesToArenaProjectionLayer(pc, bait)
+                && BaitParticipantAppliesToArenaProjectionLayer(player, bait))
+            {
+                return BaiterPriority;
+            }
+        }
+        return PlayerPriority.Irrelevant;
+    }
 
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {
         if (OnlyShowOutlines || IgnoreOtherBaits)
+        {
             return;
+        }
 
         var baits = CollectionsMarshal.AsSpan(CurrentBaits);
         var len = baits.Length;
-        var pcID = pc.InstanceID;
         for (var i = 0; i < len; ++i)
         {
             ref var b = ref baits[i];
-            if (!b.Source.IsDead && b.Target.InstanceID != pcID && (AlwaysDrawOtherBaits || IsClippedBy(pc, ref b)))
+            if (!b.Source.IsDead && b.Target != pc && (AlwaysDrawOtherBaits || IsClippedBy(pc, ref b)))
             {
-                b.Shape.Draw(Arena, BaitOrigin(ref b), b.Rotation);
+                using (Arena.WorldProjectionLayer(b.ArenaProjectionLayer, b.RestrictToArenaProjectionLayer))
+                    b.Shape.Draw(Arena, BaitOrigin(ref b), b.Rotation);
             }
         }
     }
@@ -279,13 +330,14 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
     {
         var baits = CollectionsMarshal.AsSpan(CurrentBaits);
         var len = baits.Length;
-        var pcID = pc.InstanceID;
+
         for (var i = 0; i < len; ++i)
         {
             ref var b = ref baits[i];
-            if (!b.Source.IsDead && (OnlyShowOutlines || !OnlyShowOutlines && b.Target.InstanceID == pcID))
+            if (!b.Source.IsDead && (OnlyShowOutlines || !OnlyShowOutlines && b.Target == pc))
             {
-                b.Shape.Outline(Arena, BaitOrigin(ref b), b.Rotation);
+                using (Arena.WorldProjectionLayer(b.ArenaProjectionLayer, b.RestrictToArenaProjectionLayer))
+                    b.Shape.Outline(Arena, BaitOrigin(ref b), b.Rotation);
             }
         }
     }
@@ -293,12 +345,31 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
     public override void AddGlobalHints(GlobalHints hints)
     {
         if (tankbuster && CurrentBaits.Count != 0)
+        {
             hints.Add("Tankbuster cleave");
+        }
+    }
+
+    internal static int IndexOfClosestLayer(ReadOnlySpan<float> values, float y)
+    {
+        var bestIndex = 0;
+        var bestDiff = Math.Abs(values[0] - y);
+        var len = values.Length;
+        for (var i = 1; i < len; i++)
+        {
+            var diff = Math.Abs(values[i] - y);
+
+            if (diff < bestDiff)
+            {
+                bestDiff = diff;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
     }
 }
 
 // bait on all players, requiring everyone to spread out
-[SkipLocalsInit]
 public class BaitAwayEveryone : GenericBaitAway
 {
     public BaitAwayEveryone(BossModule module, Actor? source, AOEShape shape, uint aid = default) : base(module, aid, damageType: AIHints.PredictedDamageType.Raidwide)
@@ -317,7 +388,7 @@ public class BaitAwayEveryone : GenericBaitAway
 }
 
 // component for mechanics requiring tether targets to bait their aoe away from raid
-[SkipLocalsInit]
+
 public class BaitAwayTethers(BossModule module, AOEShape shape, uint tetherID, uint aid = default, uint enemyOID = default, double activationDelay = default, bool centerAtTarget = false) : GenericBaitAway(module, aid, centerAtTarget: centerAtTarget, damageType: AIHints.PredictedDamageType.Tankbuster)
 {
     public BaitAwayTethers(BossModule module, float radius, uint tetherID, uint aid = default, uint enemyOID = default, double activationDelay = default, bool centerAtTarget = true) : this(module, new AOEShapeCircle(radius), tetherID, aid, enemyOID, activationDelay, centerAtTarget) { }
@@ -339,7 +410,10 @@ public class BaitAwayTethers(BossModule module, AOEShape shape, uint tetherID, u
             for (var i = 0; i < count; ++i)
             {
                 var b = baits[i];
-                Arena.AddLine(b.Source.Position, b.Target.Position);
+                if (BaitAppliesToArenaProjectionLayer(pc, b))
+                {
+                    Arena.AddLine(b.Source.Position, b.Target.Position);
+                }
             }
         }
     }
@@ -371,14 +445,12 @@ public class BaitAwayTethers(BossModule module, AOEShape shape, uint tetherID, u
         var (player, enemy) = DetermineTetherSides(source, tether);
         if (player != null && enemy != null)
         {
-            var eID = enemy.InstanceID;
-            var pID = player.InstanceID;
             var count = CurrentBaits.Count;
             var baits = CollectionsMarshal.AsSpan(CurrentBaits);
             for (var i = 0; i < count; ++i)
             {
                 ref var b = ref baits[i];
-                if (b.Source.InstanceID == eID && b.Target.InstanceID == pID)
+                if (b.Source == enemy && b.Target == player)
                 {
                     CurrentBaits.RemoveAt(i);
                     return;
@@ -391,11 +463,15 @@ public class BaitAwayTethers(BossModule module, AOEShape shape, uint tetherID, u
     public (Actor? player, Actor? enemy) DetermineTetherSides(Actor source, ActorTetherInfo tether)
     {
         if (tether.ID != TID)
+        {
             return (null, null);
+        }
 
         var target = WorldState.Actors.Find(tether.Target);
         if (target == null)
+        {
             return (null, null);
+        }
 
         var (player, enemy) = source.Type is ActorType.Player or ActorType.Buddy ? (source, target) : (target, source);
         if (player.Type is not ActorType.Player and not ActorType.Buddy || enemy.Type is ActorType.Player or ActorType.Buddy)
@@ -409,14 +485,17 @@ public class BaitAwayTethers(BossModule module, AOEShape shape, uint tetherID, u
 }
 
 // component for mechanics requiring icon targets to bait their aoe away from raid
-[SkipLocalsInit]
-public class BaitAwayIcon(BossModule module, AOEShape shape, uint iconID, uint aid = default, double activationDelay = 5.1d, bool centerAtTarget = false, Actor? source = null, bool tankbuster = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.Raidwide) : GenericBaitAway(module, aid, centerAtTarget: centerAtTarget, tankbuster: tankbuster, damageType: damageType)
+
+public class BaitAwayIcon(BossModule module, AOEShape shape, uint iconID, uint aid = default, double activationDelay = 5.1d, bool centerAtTarget = false, Actor? source = null, bool tankbuster = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.Raidwide, bool restrictToArenaProjectionLayer = false)
+    : GenericBaitAway(module, aid, centerAtTarget: centerAtTarget, tankbuster: tankbuster, damageType: damageType)
 {
-    public BaitAwayIcon(BossModule module, float radius, uint iconID, uint aid = default, double activationDelay = 5.1d, bool centerAtTarget = true, Actor? source = null, bool tankbuster = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.Raidwide) : this(module, new AOEShapeCircle(radius), iconID, aid, activationDelay, centerAtTarget, source, tankbuster, damageType) { }
+    public BaitAwayIcon(BossModule module, float radius, uint iconID, uint aid = default, double activationDelay = 5.1d, bool centerAtTarget = true, Actor? source = null, bool tankbuster = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.Raidwide, bool restrictToArenaProjectionLayer = false)
+        : this(module, new AOEShapeCircle(radius), iconID, aid, activationDelay, centerAtTarget, source, tankbuster, damageType, restrictToArenaProjectionLayer) { }
 
     public AOEShape Shape = shape;
     public uint IID = iconID;
     public double ActivationDelay = activationDelay;
+    public bool RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
 
     public virtual Actor? BaitSource(Actor target) => source ?? Module.PrimaryActor;
 
@@ -424,7 +503,7 @@ public class BaitAwayIcon(BossModule module, AOEShape shape, uint iconID, uint a
     {
         if (iconID == IID && BaitSource(actor) is var source && source != null)
         {
-            CurrentBaits.Add(new(source, WorldState.Actors.Find(targetID) ?? actor, Shape, WorldState.FutureTime(ActivationDelay)));
+            CurrentBaits.Add(new(source, WorldState.Actors.Find(targetID) ?? actor, Shape, WorldState.FutureTime(ActivationDelay), restrictToArenaProjectionLayer: RestrictToArenaProjectionLayer));
         }
     }
 
@@ -451,8 +530,35 @@ public class BaitAwayIcon(BossModule module, AOEShape shape, uint iconID, uint a
     }
 }
 
+public class BaitAwayIconMulti(BossModule module, AOEShape shape, uint iconID, uint[] aids, double activationDelay = 5.1d, bool centerAtTarget = false, Actor? source = null, bool tankbuster = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.Raidwide, bool restrictToArenaProjectionLayer = false)
+    : BaitAwayIcon(module, shape, iconID, activationDelay: activationDelay, source: source, centerAtTarget: centerAtTarget, tankbuster: tankbuster, damageType: damageType, restrictToArenaProjectionLayer: restrictToArenaProjectionLayer)
+{
+    public BaitAwayIconMulti(BossModule module, float radius, uint iconID, uint[] aids, double activationDelay = 5.1d, bool centerAtTarget = true, Actor? source = null, bool tankbuster = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.Raidwide, bool restrictToArenaProjectionLayer = false)
+        : this(module, new AOEShapeCircle(radius), iconID, aids, activationDelay, centerAtTarget, source, tankbuster, damageType, restrictToArenaProjectionLayer) { }
+
+    protected readonly uint[] AIDs = aids;
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        var len = AIDs.Length;
+        var id = spell.Action.ID;
+        for (var i = 0; i < len; ++i)
+        {
+            if (id == AIDs[i])
+            {
+                if (CurrentBaits.Count != 0)
+                {
+                    CurrentBaits.RemoveAt(0);
+                }
+                ++NumCasts;
+                return;
+            }
+        }
+    }
+}
+
 // component for mechanics requiring cast targets to gtfo from raid (aoe tankbusters etc)
-[SkipLocalsInit]
+
 public class BaitAwayCast(BossModule module, uint aid, AOEShape shape, bool centerAtTarget = false, bool endsOnCastEvent = false, bool tankbuster = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.Raidwide) : GenericBaitAway(module, aid, centerAtTarget: centerAtTarget, tankbuster: tankbuster, damageType: damageType)
 {
     public BaitAwayCast(BossModule module, uint aid, float radius, bool centerAtTarget = true, bool endsOnCastEvent = false, bool tankbuster = false, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.Raidwide) : this(module, aid, new AOEShapeCircle(radius), centerAtTarget, endsOnCastEvent, tankbuster, damageType: damageType) { }
@@ -525,7 +631,7 @@ public class BaitAwayCast(BossModule module, uint aid, AOEShape shape, bool cent
 }
 
 // a variation of BaitAwayCast for charges that end at target
-[SkipLocalsInit]
+
 public class BaitAwayChargeCast(BossModule module, uint aid, float halfWidth) : GenericBaitAway(module, aid, damageType: AIHints.PredictedDamageType.Tankbuster)
 {
     private readonly float HalfWidth = halfWidth;
@@ -561,7 +667,10 @@ public class BaitAwayChargeCast(BossModule module, uint aid, float halfWidth) : 
     {
         var count = CurrentBaits.Count;
         if (count == 0)
+        {
             return;
+        }
+
         var baits = CollectionsMarshal.AsSpan(CurrentBaits);
         for (var i = 0; i < count; ++i)
         {
@@ -576,7 +685,7 @@ public class BaitAwayChargeCast(BossModule module, uint aid, float halfWidth) : 
 }
 
 // a variation of baits with tethers for charges that end at target
-[SkipLocalsInit]
+
 public class BaitAwayChargeTether(BossModule module, float halfWidth, double activationDelay, uint aidGood, uint aidBad = default, uint tetherIDBad = 57u, uint tetherIDGood = 1u, uint enemyOID = default, float minimumDistance = default)
 : StretchTetherDuo(module, minimumDistance, activationDelay, tetherIDBad, tetherIDGood, new AOEShapeRect(default, halfWidth), default, enemyOID)
 {
@@ -589,7 +698,10 @@ public class BaitAwayChargeTether(BossModule module, float halfWidth, double act
         base.Update();
         var count = CurrentBaits.Count;
         if (count == 0)
+        {
             return;
+        }
+
         var baits = CollectionsMarshal.AsSpan(CurrentBaits);
         for (var i = 0; i < count; ++i)
         {
@@ -625,14 +737,17 @@ public class BaitAwayChargeTether(BossModule module, float halfWidth, double act
     public override void AddHints(int slot, Actor actor, TextHints hints)
     {
         if (ActiveBaits.Count == 0)
+        {
             return;
+        }
+
         base.AddHints(slot, actor, hints);
         var count = CurrentBaits.Count;
-        var id = actor.InstanceID;
+
         for (var i = 0; i < count; ++i)
         {
             var b = CurrentBaits[i];
-            if (b.Target.InstanceID != id)
+            if (b.Target != actor || !BaitParticipantAppliesToArenaProjectionLayer(actor, b))
             {
                 continue;
             }
@@ -645,10 +760,9 @@ public class BaitAwayChargeTether(BossModule module, float halfWidth, double act
     }
 }
 
-[SkipLocalsInit]
 public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits = true, bool onlyShowOutlines = false) : CastCounter(module, default)
 {
-    public struct Bait(WPos source, AOEShape shape, DateTime activation = default, int numTargets = 1, bool nearest = true, bool stack = false, int minStack = 1, int maxStack = 1, bool centerAtTarget = false, bool tankbuster = false, uint caster = default, Role role = Role.None, BitMask forbidden = default, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.None, Angle? customRotation = null, WDir offset = default)
+    public struct Bait(WPos source, AOEShape shape, DateTime activation = default, int numTargets = 1, bool nearest = true, bool stack = false, int minStack = 1, int maxStack = 1, bool centerAtTarget = false, bool tankbuster = false, uint caster = default, Role role = Role.None, BitMask forbidden = default, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.None, Angle? customRotation = null, WDir offset = default, int? arenaProjectionLayer = null, bool restrictToArenaProjectionLayer = false)
     {
         public WPos Position = source;
         public AOEShape Shape = shape;
@@ -666,9 +780,11 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
         public uint CasterID = caster;
         public AIHints.PredictedDamageType DamageType = damageType;
         public Angle? CustomRotation = customRotation;
+        public int? ArenaProjectionLayer = arenaProjectionLayer;
+        public bool RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
 
-        public Bait(Actor source, AOEShape shape, DateTime activation = default, int numTargets = 1, bool nearest = true, bool stack = false, int minStack = 1, int maxStack = 1, bool centerAtTarget = false, bool tankbuster = false, uint caster = default, Role role = Role.None, BitMask forbidden = default, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.None, Angle? customRotation = null, WDir offset = default)
-            : this(source.Position, shape, activation, numTargets, nearest, stack, minStack, maxStack, centerAtTarget, tankbuster, caster, role, forbidden, damageType, customRotation, offset) { }
+        public Bait(Actor source, AOEShape shape, DateTime activation = default, int numTargets = 1, bool nearest = true, bool stack = false, int minStack = 1, int maxStack = 1, bool centerAtTarget = false, bool tankbuster = false, uint caster = default, Role role = Role.None, BitMask forbidden = default, AIHints.PredictedDamageType damageType = AIHints.PredictedDamageType.None, Angle? customRotation = null, WDir offset = default, int? arenaProjectionLayer = null, bool restrictToArenaProjectionLayer = false)
+            : this(source.Position, shape, activation, numTargets, nearest, stack, minStack, maxStack, centerAtTarget, tankbuster, caster, role, forbidden, damageType, customRotation, offset, arenaProjectionLayer, restrictToArenaProjectionLayer) { }
     }
 
     public readonly bool AlwaysDrawOtherBaits = alwaysDrawOtherBaits; // if false, other baits are drawn only if they are clipping a player
@@ -690,7 +806,7 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
             {
                 return CurrentBaits;
             }
-            List<Bait> activeBaits = new(count);
+            List<Bait> activeBaits = [with(count)];
             var curBaits = CollectionsMarshal.AsSpan(CurrentBaits);
             for (var i = 0; i < count; ++i)
             {
@@ -700,10 +816,14 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
                 {
                     var caster = Module.Enemies(casterId);
                     if (caster.Count == 0)
+                    {
                         continue;
+                    }
 
                     if (caster[0].IsDeadOrDestroyed)
+                    {
                         continue;
+                    }
                 }
 
                 var targets = GetTargets(bait);
@@ -725,16 +845,22 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
     public WPos BaitOrigin(ref Bait bait, Actor target) => (bait.CenterAtTarget ? target.Position : bait.Position) + bait.Offset;
     public Angle BaitRotation(ref Bait bait, Actor target) => Angle.FromDirection(target.Position - bait.Position);
     public bool IsClippedBy(Actor pc, ref Bait bait, Actor target) => bait.Shape.Check(pc.Position, BaitOrigin(ref bait, target), BaitRotation(ref bait, target));
+    protected bool BaitAppliesToArenaProjectionLayer(Actor actor, in Bait bait)
+        => ArenaProjectionLayerApplies(actor, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer);
+    protected bool BaitParticipantAppliesToArenaProjectionLayer(Actor actor, in Bait bait)
+        => ArenaProjectionLayerParticipantApplies(actor, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer);
+
     public List<Actor> PlayersClippedBy(ref Bait bait, Actor target)
     {
         var actors = Raid.WithoutSlot();
         var len = actors.Length;
-        List<Actor> result = new(len);
+        List<Actor> result = [with(len)];
         for (var i = 0; i < len; ++i)
         {
             var actor = actors[i];
-            var id = actor.InstanceID;
-            if (id != target.InstanceID && bait.Shape.Check(actor.Position, BaitOrigin(ref bait, target), BaitRotation(ref bait, target)))
+            if (actor != target
+                && Module.ActorMatchesArenaProjectionLayer(actor, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer)
+                && bait.Shape.Check(actor.Position, BaitOrigin(ref bait, target), BaitRotation(ref bait, target)))
             {
                 result.Add(actor);
             }
@@ -749,7 +875,7 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
 
         for (var j = 0; j < length; j++)
         {
-            if (targets[j].InstanceID == target.InstanceID)
+            if (targets[j] == target)
             {
                 return true;
             }
@@ -764,14 +890,22 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
         var len = baits.Length;
 
         if (len == 0)
+        {
             return;
+        }
 
         for (var i = 0; i < len; i++)
         {
             ref var b = ref baits[i];
+            if (!BaitParticipantAppliesToArenaProjectionLayer(actor, b))
+            {
+                continue;
+            }
             var baiter = IsBaitTarget(ref b, actor) ? actor : default;
             if (baiter == default)
+            {
                 continue;
+            }
 
             var clippedPlayers = PlayersClippedBy(ref b, baiter);
             var clippedCount = clippedPlayers.Count;
@@ -806,6 +940,10 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
             for (var i = 0; i < len; i++)
             {
                 ref var b = ref baits[i];
+                if (!BaitParticipantAppliesToArenaProjectionLayer(actor, b))
+                {
+                    continue;
+                }
                 var targets = GetTargets(b);
                 var tarLen = targets.Length;
 
@@ -848,12 +986,14 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {
         if (OnlyShowOutlines || IgnoreOtherBaits)
+        {
             return;
+        }
 
         BitMask targetted = default;
         var baits = CollectionsMarshal.AsSpan(ActiveBaits);
         var len = baits.Length;
-        var pcID = pc.InstanceID;
+
         for (var i = 0; i < len; ++i)
         {
             ref var b = ref baits[i];
@@ -867,9 +1007,10 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
                 targetted.Set(slot);
 
                 // always draw stacks even if player isn't clipped by it
-                if (target.InstanceID != pcID && (AlwaysDrawOtherBaits || b.IsStack || IsClippedBy(pc, ref b, target)))
+                if (target != pc && (AlwaysDrawOtherBaits || b.IsStack || IsClippedBy(pc, ref b, target)))
                 {
-                    b.Shape.Draw(Arena, BaitOrigin(ref b, target), BaitRotation(ref b, target), b.IsStack ? Colors.Safe : Colors.AOE);
+                    using (Arena.WorldProjectionLayer(b.ArenaProjectionLayer, b.RestrictToArenaProjectionLayer))
+                        b.Shape.Draw(Arena, BaitOrigin(ref b, target), BaitRotation(ref b, target), b.IsStack ? Colors.Safe : Colors.AOE);
                 }
             }
         }
@@ -879,7 +1020,7 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
     {
         var baits = CollectionsMarshal.AsSpan(ActiveBaits);
         var len = baits.Length;
-        var pcID = pc.InstanceID;
+
         for (var i = 0; i < len; ++i)
         {
             ref var b = ref baits[i];
@@ -889,9 +1030,10 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
             for (var j = 0; j < tarLen; j++)
             {
                 var target = targets[j];
-                if (OnlyShowOutlines || !OnlyShowOutlines && target.InstanceID == pcID)
+                if (OnlyShowOutlines || !OnlyShowOutlines && target == pc)
                 {
-                    b.Shape.Outline(Arena, BaitOrigin(ref b, target), BaitRotation(ref b, target));
+                    using (Arena.WorldProjectionLayer(b.ArenaProjectionLayer, b.RestrictToArenaProjectionLayer))
+                        b.Shape.Outline(Arena, BaitOrigin(ref b, target), BaitRotation(ref b, target));
                 }
             }
         }
@@ -905,21 +1047,29 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
         // just show everyone if there are active baits
         // maybe write so it only shows players that are baiting or getting clipped by bait?
         if (!IsActive)
+        {
             return PlayerPriority.Irrelevant;
+        }
 
         var baits = CollectionsMarshal.AsSpan(ActiveBaits);
         var len = baits.Length;
 
+        var haveApplicableBait = false;
         for (var i = 0; i < len; i++)
         {
             ref var bait = ref baits[i];
+            if (!BaitAppliesToArenaProjectionLayer(pc, bait))
+            {
+                continue;
+            }
+            haveApplicableBait = true;
             if (IsBaitTarget(ref bait, player))
             {
                 return PlayerPriority.Danger;
             }
         }
 
-        return PlayerPriority.Normal;
+        return haveApplicableBait ? PlayerPriority.Normal : PlayerPriority.Irrelevant;
     }
 
     public ReadOnlySpan<Actor> GetTargets(Bait bait)
@@ -937,7 +1087,8 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
         for (var i = 0; i < partyLen; i++)
         {
             var actor = party[i].Item2;
-            if (bait.SpecifiedRole == Role.None || actor.Role == bait.SpecifiedRole)
+            if ((bait.SpecifiedRole == Role.None || actor.Role == bait.SpecifiedRole)
+                && Module.ActorMatchesArenaProjectionLayer(actor, bait.ArenaProjectionLayer, bait.RestrictToArenaProjectionLayer))
             {
                 partyRoles[roleLen++] = actor;
             }
@@ -948,9 +1099,9 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
 
         for (var i = 0; i < roleLen; ++i)
         {
-            var p = party[i];
-            var distSq = (p.Item2.Position - bait.Position).LengthSq();
-            distances[i] = (p.Item2, distSq);
+            var p = partyRoles[i];
+            var distSq = (p.Position - bait.Position).LengthSq();
+            distances[i] = (p, distSq);
         }
 
         var isNearest = bait.FromNearest;
@@ -962,7 +1113,9 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
             for (var j = i + 1; j < roleLen; ++j)
             {
                 if (isNearest && distances[j].distSq < distances[selIdx].distSq || !isNearest && distances[j].distSq > distances[selIdx].distSq)
+                {
                     selIdx = j;
+                }
             }
 
             if (selIdx != i)

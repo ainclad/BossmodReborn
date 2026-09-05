@@ -24,8 +24,8 @@ public enum AID : uint
 
 sealed class SearchMarkOfDeath(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeCone cone2 = new(9f, 60f.Degrees()); // bigger than MarkOfDeath since its moving and we want a safety margin
-    private static readonly uint[] allObservers = [(uint)OID.ObserversEye1, (uint)OID.ObserversEye2];
+    private readonly AOEShapeCone cone2 = new(9f, 60f.Degrees()); // bigger than MarkOfDeath since its moving and we want a safety margin
+    private readonly uint[] allObservers = [(uint)OID.ObserversEye1, (uint)OID.ObserversEye2];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -79,5 +79,5 @@ sealed class APryingEyeStates : StateMachineBuilder
 }
 
 [ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.ForayFATE, GroupID = 1018, NameID = 1970)]
-public sealed class APryingEye(WorldState ws, Actor primary) : SimpleBossModule(ws, primary);
+public sealed class APryingEye(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);
 

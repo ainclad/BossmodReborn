@@ -6,7 +6,7 @@ namespace BossMod;
 // column representing single planner track (could be cooldowns or anything else)
 public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tree, List<int> phaseBranches, string name) : ColumnGenericHistory(timeline, tree, phaseBranches, name)
 {
-    public sealed class Element(Entry window, float windowLength, bool disabled, StrategyValue value)
+    public sealed class Element(Entry window, float windowLength, bool disabled, StrategyValue value, StrategyCondition condType, int condParam)
     {
         public Entry Window = window; // entry duration is window length clamped to phase duration
         public Entry? Effect; // null if window length is >= than effect length
@@ -16,6 +16,8 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
         public float CooldownLength;
         public bool Disabled = disabled;
         public StrategyValue Value = value;
+        public StrategyCondition ConditionType = condType;
+        public int ConditionParam = condParam;
 
         public float TotalVisualLength => Math.Max(EffectLength, Window.Duration + CooldownLength);
     }
@@ -41,7 +43,7 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
                 if (EditElement(_popupElement))
                 {
                     UpdateElement(_popupElement);
-                    NotifyModified();
+                    OnModified();
                 }
                 ImGui.EndPopup();
             }
@@ -62,12 +64,14 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
                 {
                     // create new entry
                     var (node, delay) = Tree.AbsoluteTimeToNodeAndDelay(Timeline.ScreenCoordToTime(lclickPos.Y), PhaseBranches);
-                    toEdit = AddElement(node, delay, 0, false, GetDefaultValue());
+                    toEdit = AddElement(node, delay, 0, false, GetDefaultValue(), default, 0);
                 }
 
                 _edit = new(toEdit, Math.Abs(lclickPos.Y - Timeline.TimeToScreenCoord(toEdit.Window.TimeSinceGlobalStart(Tree) + toEdit.Window.Duration)) < 5);
                 if (_edit.EditingEnd)
+                {
                     toEdit.WindowLength = toEdit.Window.Duration; // if we're starting edit of the window-end, ensure it's matching visual value (clamped to phase duration)
+                }
             }
 
             // continue editing
@@ -91,12 +95,17 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
                 // finish editing
                 var minTime = _edit.Element.Window.AttachNode.PhaseID == 0 && _edit.Element.Window.AttachNode.Predecessor == null ? Timeline.MinTime : 0;
                 if (_edit.EditingEnd)
+                {
                     _edit.Element.WindowLength = Math.Max(MathF.Round(_edit.Element.WindowLength, 1), 0.1f);
+                }
                 else
+                {
                     _edit.Element.Window.Delay = Math.Max(MathF.Round(_edit.Element.Window.Delay, 1), minTime);
+                }
+
                 UpdateElement(_edit.Element);
                 _edit = null;
-                NotifyModified();
+                OnModified();
             }
         }
 
@@ -104,7 +113,9 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
         {
             _popupElement = Elements.Find(e => ScreenPosInElement(lclickPos, e));
             if (_popupElement != null)
+            {
                 ImGui.OpenPopup(popupName);
+            }
         }
 
         var rclickPos = ImGui.GetIO().MouseClickedPos[1];
@@ -121,7 +132,7 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
                 {
                     Elements[clickedElemIndex].Disabled ^= true;
                     UpdateElement(Elements[clickedElemIndex]);
-                    NotifyModified();
+                    OnModified();
                 }
             }
         }
@@ -138,8 +149,14 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
             var mousePos = ImGui.GetMousePos();
             if (ScreenPosInTrack(mousePos))
             {
-                foreach (var e in Elements.Where(e => ScreenPosInElement(mousePos, e)))
+                for (var ei = 0; ei < Elements.Count; ++ei)
                 {
+                    var e = Elements[ei];
+                    if (!ScreenPosInElement(mousePos, e))
+                    {
+                        continue;
+                    }
+
                     HoverElement(e);
                 }
             }
@@ -147,11 +164,23 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
         }
     }
 
-    public Element AddElement(StateMachineTree.Node attachNode, float delay, float windowLength, bool disabled, StrategyValue value)
+    public override void Update()
+    {
+        foreach (var e in Elements)
+        {
+            var fk = FilterKey(e);
+            var visible = fk == null || Timeline.ActiveFilters.Contains(fk);
+            e.Window.Visible = visible;
+            e.Effect?.Visible = visible;
+            e.Cooldown?.Visible = visible;
+        }
+    }
+
+    public Element AddElement(StateMachineTree.Node attachNode, float delay, float windowLength, bool disabled, StrategyValue value, StrategyCondition condType, int condParam)
     {
         var w = new Entry(Entry.Type.Range, attachNode, delay, windowLength, "", Timeline.Colors.PlannerWindow[0]);
         Entries.Add(w);
-        var e = new Element(w, windowLength, disabled, value);
+        var e = new Element(w, windowLength, disabled, value, condType, condParam);
         Elements.Add(e);
         UpdateElement(e);
         return e;
@@ -162,21 +191,35 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
         var e = Elements[index];
         Entries.Remove(e.Window);
         if (e.Effect != null)
+        {
             Entries.Remove(e.Effect);
+        }
+
         if (e.Cooldown != null)
+        {
             Entries.Remove(e.Cooldown);
+        }
+
         if (_edit?.Element == e)
+        {
             _edit = null;
+        }
+
         if (_popupElement == e)
+        {
             _popupElement = null;
+        }
+
         Elements.RemoveAt(index);
-        NotifyModified();
+        OnModified();
     }
 
     public void UpdateAllElements()
     {
         foreach (var e in Elements)
+        {
             UpdateElement(e);
+        }
     }
 
     protected abstract StrategyValueTrack GetDefaultValue();
@@ -186,7 +229,7 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
 
     protected bool EditElementWindow(Element e)
     {
-        bool modified = false;
+        var modified = false;
 
         var startGlobal = e.Window.TimeSinceGlobalStart(Tree);
         if (ImGui.InputFloat("Press at (relative to pull)", ref startGlobal))
@@ -204,13 +247,19 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
 
         modified |= ImGui.InputFloat("Press at (relative to state)", ref e.Window.Delay);
         modified |= ImGui.InputFloat("Window length", ref e.WindowLength);
+
+        modified |= DrawConditionEditor(e);
+
         return modified;
     }
 
     protected bool ScreenPosInElement(Vector2 pos, Element e)
     {
         if (!IsEntryVisible(e.Window))
+        {
             return false;
+        }
+
         var tStart = e.Window.TimeSinceGlobalStart(Tree);
         var yMin = Timeline.TimeToScreenCoord(tStart);
         var yMax = Timeline.TimeToScreenCoord(tStart + e.TotalVisualLength);
@@ -275,15 +324,30 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
         var tStart = element.Window.TimeSinceGlobalStart(Tree);
 
         var tooltip = DescribeElement(element);
+
+        switch (element.ConditionType)
+        {
+            case StrategyCondition.AssignedRole:
+                tooltip.Add($"If: Role = {(PartyRolesConfig.Assignment)element.ConditionParam}");
+                break;
+        }
+
         tooltip.Add($"Press at: {tStart:f1}s ({element.Window.TimeSincePhaseStart():f1}s since phase start, {element.Window.Delay:f1}s after state start)");
         if (element.Window.AttachNode.Predecessor != null)
+        {
             tooltip.Add($"Attached: {element.Window.Delay:f1}s after {element.Window.AttachNode.Predecessor.State.ID:X} '{element.Window.AttachNode.Predecessor.State.Name}' ({element.Window.AttachNode.Predecessor.State.Comment})");
+        }
         else
+        {
             tooltip.Add($"Attached: {element.Window.Delay:f1}s after pull");
+        }
+
         tooltip.Add($"Next state: {element.Window.AttachNode.State.Duration - element.Window.Delay:f1}s before {element.Window.AttachNode.State.ID:X} '{element.Window.AttachNode.State.Name}' ({element.Window.AttachNode.State.Comment})");
         tooltip.Add($"Window: {element.WindowLength:f1}s");
         if (element.Disabled)
+        {
             tooltip.Add("*** DISABLED *** (right-click to reenable, shift-right-click to delete)");
+        }
 
         Timeline.AddTooltip(tooltip);
         Timeline.HighlightTime(tStart);
@@ -291,4 +355,37 @@ public abstract class ColumnPlannerTrack(Timeline timeline, StateMachineTree tre
         Timeline.HighlightTime(tStart + element.EffectLength);
         Timeline.HighlightTime(tStart + element.Window.Duration + element.CooldownLength);
     }
+
+    protected bool DrawConditionEditor(Element e)
+    {
+        var modified = UICombo.Enum("Condition type", ref e.ConditionType);
+
+        switch (e.ConditionType)
+        {
+            case StrategyCondition.AssignedRole:
+                var raw = (PartyRolesConfig.Assignment)e.ConditionParam;
+                if (UICombo.Enum("Role", ref raw))
+                {
+                    e.ConditionParam = (int)raw;
+                    modified = true;
+                }
+                break;
+        }
+
+        return modified;
+    }
+
+    private void OnModified()
+    {
+        NotifyModified();
+        Timeline.UpdateFilters();
+    }
+
+    protected static string? FilterKey(Element e) => e.ConditionType switch
+    {
+        StrategyCondition.AssignedRole => $"Role = {(PartyRolesConfig.Assignment)e.ConditionParam}",
+        _ => null
+    };
+
+    public override IEnumerable<string> GetSupportedFilters() => Elements.Where(e => e.ConditionType != default).Select(e => FilterKey(e)!);
 }

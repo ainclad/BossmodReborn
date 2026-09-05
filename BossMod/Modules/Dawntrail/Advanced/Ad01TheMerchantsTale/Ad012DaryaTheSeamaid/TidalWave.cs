@@ -1,4 +1,4 @@
-﻿namespace BossMod.Dawntrail.Advanced.AV1MerchantsTale.Ad012DaryaTheSeamaid;
+﻿namespace BossMod.Dawntrail.Advanced.Ad01TheMerchantsTale.Ad012DaryaTheSeamaid;
 
 sealed class SeaShackles(BossModule module) : Components.StretchTetherDuo(module, 25f, 30d, (uint)TetherID.TetherBad, (uint)TetherID.TetherGood)
 {
@@ -61,6 +61,7 @@ sealed class TidalWave(BossModule module) : Components.SimpleKnockbacks(module, 
             _puddles.Add(caster.Position);
         }
     }
+
     public override void OnActorDeath(Actor actor)
     {
         if (actor.OID == (uint)OID.AquaSpearVoidzone)
@@ -68,6 +69,7 @@ sealed class TidalWave(BossModule module) : Components.SimpleKnockbacks(module, 
             _puddles.Clear();
         }
     }
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         // want to avoid getting knocked back into and knocked back over puddles

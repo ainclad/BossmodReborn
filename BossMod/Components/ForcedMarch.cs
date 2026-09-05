@@ -4,7 +4,6 @@
 // these mechanics typically feature 'march left/right/forward/backward' debuffs, which rotate player and apply 'forced march' on expiration
 // if there are several active march debuffs, we assume they are chained together
 
-[SkipLocalsInit]
 public class GenericForcedMarch(BossModule module, float activationLimit = float.MaxValue, bool stopAfterWall = false, bool stopAtWall = false) : BossComponent(module)
 {
     public sealed class PlayerState
@@ -33,10 +32,15 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
         var movements = ForcedMovements(actor);
         var count = movements.Count;
         if (count == 0)
+        {
             return;
+        }
+
         var last = movements[count - 1];
         if (last.from != last.to && DestinationUnsafe(slot, actor, last.to))
+        {
             hints.Add("Aim for safe spot!");
+        }
     }
 
     public override void DrawArenaForeground(int pcSlot, Actor pc)
@@ -76,7 +80,9 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
     {
         var state = State.GetValueOrDefault(player.InstanceID);
         if (state == null)
+        {
             return [];
+        }
 
         var from = player.Position;
         var dir = !OverrideDirection ? player.Rotation : default;
@@ -111,7 +117,9 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
         {
             var move = state.PendingMoves[i];
             if (move.activation > limit)
+            {
                 break;
+            }
 
             dir += move.dir;
             var movementDistance = MovementSpeed * move.duration;
@@ -135,7 +143,6 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
 }
 
 // typical forced march is driven by statuses
-[SkipLocalsInit]
 public class StatusDrivenForcedMarch(BossModule module, float duration, uint statusForward, uint statusBackward, uint statusLeft, uint statusRight, uint statusForced = 1257u, uint statusForcedNPCs = 3629u, float activationLimit = float.MaxValue, bool stopAfterWall = false, bool stopAtWall = false) : GenericForcedMarch(module, activationLimit, stopAfterWall, stopAtWall)
 {
     public float Duration = duration;
@@ -179,7 +186,6 @@ public class StatusDrivenForcedMarch(BossModule module, float duration, uint sta
 }
 
 // action driven forced march
-[SkipLocalsInit]
 public class ActionDrivenForcedMarch(BossModule module, uint aid, float duration, Angle rotation, float actioneffectdelay, uint statusForced = 5174u, uint statusForcedNPCs = 3629u, float activationLimit = float.MaxValue) : GenericForcedMarch(module, activationLimit)
 {
     public readonly float Duration = duration;
@@ -210,7 +216,9 @@ public class ActionDrivenForcedMarch(BossModule module, uint aid, float duration
     public override void OnStatusLose(Actor actor, ref ActorStatus status)
     {
         if (status.ID == StatusForced || status.ID == StatusForcedNPCs)
+        {
             DeactivateForcedMovement(actor);
+        }
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -220,7 +228,9 @@ public class ActionDrivenForcedMarch(BossModule module, uint aid, float duration
             var party = Module.Raid.WithoutSlot();
             var len = party.Length;
             for (var i = 0; i < len; ++i)
+            {
                 AddForcedMovement(party[i], Rotation, Duration, Module.CastFinishAt(spell, Actioneffectdelay));
+            }
         }
     }
 }

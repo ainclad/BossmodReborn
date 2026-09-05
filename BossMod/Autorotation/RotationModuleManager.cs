@@ -1,4 +1,7 @@
-﻿namespace BossMod.Autorotation;
+using BossMod.AI;
+using FFXIVClientStructs.FFXIV.Common.Component.BGCollision;
+
+namespace BossMod.Autorotation;
 
 public interface IRotationModuleData
 {
@@ -11,6 +14,7 @@ public interface IRotationModuleData
 public sealed class RotationModuleManager : IDisposable
 {
     private readonly record struct ActiveModule(int DataIndex, RotationModuleDefinition Definition, RotationModule Module);
+    public readonly record struct LineOfSightFix(ulong TargetID, WPos Origin, WPos Destination);
 
     public Preset? Preset
     {
@@ -28,11 +32,32 @@ public sealed class RotationModuleManager : IDisposable
     public int PlayerSlot; // TODO: reconsider, we rely on too many things in clientstate...
     public readonly AIHints Hints;
     public PlanExecution? Planner;
+
+    // raised whenever the active plan (and therefore the set of upcoming planned actions) changes; used by external IPC users (RSR) to know when to re-poll
+    public event Action? PlannedActionsChanged;
+
     private static readonly PartyRolesConfig _prc = Service.Config.Get<PartyRolesConfig>();
     private readonly EventSubscriptions _subscriptions;
     private List<ActiveModule>? ActiveModules;
+    private bool WantsLoSFix
+    {
+        get
+        {
+            var count = ActiveModules?.Count;
+            for (var i = 0; i < count; ++i)
+            {
+                if (ActiveModules![i].Module.WantsLoSFix)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 
     public static readonly Preset ForceDisable = new(""); // empty preset, so if it's activated, rotation is force disabled
+
+    private static readonly AIConfig _aiConfig = Service.Config.Get<AIConfig>();
 
     public WorldState WorldState => Bossmods.WorldState;
     public ulong PlayerInstanceId => WorldState.Party.Members[PlayerSlot].InstanceId;
@@ -41,6 +66,10 @@ public sealed class RotationModuleManager : IDisposable
     // historic data for recent events that could be interesting for modules
     public DateTime CombatStart; // default value when player is not in combat, otherwise timestamp when player entered combat
     public (DateTime Time, ActorCastEvent? Data) LastCast;
+    public LineOfSightFix? LoSFix;
+
+    public volatile float LastRasterizeMs;
+    public volatile float LastPathfindMs;
 
     // list of status effects that disable the player's default action set, but do not disable *all* actions
     // in these cases, we want to prevent active rotation modules from queueing any actions, because they might affect positioning or rotation, or interfere with player's attempt to manually use an action
@@ -54,10 +83,13 @@ public sealed class RotationModuleManager : IDisposable
         (uint)Shadowbringers.Alliance.A33RedGirl.SID.Program000000,
         (uint)Shadowbringers.Alliance.A33RedGirl.SID.ProgramFFFFFFF,
 
+        (uint)Stormblood.Dungeon.D09DrownedCityOfSkalla.D092TheOldOne.SID.Transfiguration,
+
         565u, // "Transfiguration" from certain pomanders in Palace of the Dead
         439u, // "Toad", palace of the dead
         1546u, // "Odder", heaven-on-high
         3502u, // "Owlet", EO
+        1284u, // "Out of the Action", bardam's mettle b2 and probably some others
         404u, // "Transporting", not a transformation but prevents actions
         4235u, // "Rage" status from Phantom Berserker, prevents all actions and movement
         4376u, // "Transporting", variant in Occult Crescent
@@ -86,7 +118,10 @@ public sealed class RotationModuleManager : IDisposable
             WorldState.Party.Modified.Subscribe(op => DirtyActiveModules(op.Slot == PlayerSlot)),
             WorldState.Client.ActionRequested.Subscribe(OnActionRequested),
             WorldState.Client.CountdownChanged.Subscribe(OnCountdownChanged),
-            Database.Presets.PresetModified.Subscribe(OnPresetModified)
+            WorldState.Client.ActionFailedLoS.Subscribe(OnLoSFailed),
+            Database.Presets.PresetModified.Subscribe(OnPresetModified),
+            WorldState.IsPvPAreaChanged.Subscribe(a => DirtyActiveModules(true)),
+            _aiConfig.Modified.Subscribe(() => DirtyActiveModules(true))
         );
     }
 
@@ -113,6 +148,7 @@ public sealed class RotationModuleManager : IDisposable
             Service.Log($"[RMM] Changing active plan: '{Planner?.Plan?.Guid}' -> '{expectedPlan?.Guid}'");
             Planner = Bossmods.ActiveModule != null ? new(Bossmods.ActiveModule, expectedPlan) : null;
             DirtyActiveModules(Preset == null);
+            PlannedActionsChanged?.Invoke();
         }
 
         // rebuild modules if needed
@@ -123,7 +159,7 @@ public sealed class RotationModuleManager : IDisposable
             return;
 
         // forced target update
-        if (Hints.ForcedTarget == null && Preset == null && Planner?.ActiveForcedTarget() is var forced && forced != null)
+        if (Hints.ForcedTarget == null && Preset == null && Planner?.ActiveForcedTarget(WorldState, PlayerSlot) is var forced && forced != null)
         {
             Hints.ForcedTarget = forced.Target != StrategyTarget.Automatic
                 ? ResolveTargetOverride(forced.Target, forced.TargetParam)
@@ -132,10 +168,11 @@ public sealed class RotationModuleManager : IDisposable
 
         // auto actions
         var target = Hints.ForcedTarget ?? WorldState.Actors.Find(Player?.TargetID ?? 0);
-        for (var i = 0; i < ActiveModules.Count; ++i)
+        var count = ActiveModules.Count;
+        for (var i = 0; i < count; ++i)
         {
             var m = ActiveModules[i];
-            var values = Preset?.ActiveStrategyOverrides(m.DataIndex) ?? Planner?.ActiveStrategyOverrides(m.DataIndex) ?? throw new InvalidOperationException("Both preset and plan are null, but there are active modules");
+            var values = Preset?.ActiveStrategyOverrides(m.DataIndex) ?? Planner?.ActiveStrategyOverrides(m.DataIndex, WorldState, PlayerSlot) ?? throw new InvalidOperationException("Both preset and plan are null, but there are active modules");
             m.Module.Execute(values, target, estimatedAnimLockDelay, isMoving);
         }
     }
@@ -144,9 +181,9 @@ public sealed class RotationModuleManager : IDisposable
     {
         StrategyTarget.Self => Player,
         StrategyTarget.PartyByAssignment => _prc.SlotsPerAssignment(WorldState.Party) is var spa && param < spa.Length ? WorldState.Party[spa[param]] : null,
-        StrategyTarget.PartyWithLowestHP => FilteredPartyMembers((StrategyPartyFiltering)param).MinBy(a => a.HPMP.CurHP),
-        StrategyTarget.EnemyWithHighestPriority => Hints.PriorityTargets.MaxBy(RateEnemy((StrategyEnemySelection)param))?.Actor,
-        StrategyTarget.EnemyByOID => Player != null && (uint)param is var oid && oid != 0 ? Hints.PotentialTargets.Where(e => e.Actor.OID == oid).MinBy(e => (e.Actor.Position - Player.Position).LengthSq())?.Actor : null,
+        StrategyTarget.PartyWithLowestHP => ResolvePartyWithLowestHP((StrategyPartyFiltering)param),
+        StrategyTarget.EnemyWithHighestPriority => ResolvePriorityEnemy((StrategyEnemySelection)param),
+        StrategyTarget.EnemyByOID => ResolveEnemyByOID((uint)param),
         _ => null
     };
 
@@ -160,44 +197,116 @@ public sealed class RotationModuleManager : IDisposable
 
     public override string ToString() => string.Join(", ", ActiveModules?.Select(m => m.Module.GetType().Name) ?? []);
 
-    private IEnumerable<Actor> FilteredPartyMembers(StrategyPartyFiltering filter)
+    private Actor? ResolvePartyWithLowestHP(StrategyPartyFiltering filter)
     {
         var fullMask = new BitMask(~0ul);
         var allowedMask = fullMask;
         if (!filter.HasFlag(StrategyPartyFiltering.IncludeSelf))
+        {
             allowedMask.Clear(PlayerSlot);
+        }
         if (filter.HasFlag(StrategyPartyFiltering.ExcludeNoPredictedDamage))
         {
-            var predictedDamage = Hints.PredictedDamage.Aggregate(default(BitMask), (s, p) => s | p.Players);
+            var predictedDamage = default(BitMask);
+            var predicteddamage = Hints.PredictedDamage;
+            var count = predicteddamage.Count;
+            for (var i = 0; i < count; ++i)
+            {
+                var prediction = predicteddamage[i];
+                predictedDamage |= prediction.Players;
+            }
             allowedMask &= predictedDamage;
         }
 
         if (allowedMask.None())
-            return [];
-        var players = allowedMask != fullMask ? WorldState.Party.WithSlot().IncludedInMask(allowedMask).Actors() : WorldState.Party.WithoutSlot();
-        if ((filter & (StrategyPartyFiltering.ExcludeTanks | StrategyPartyFiltering.ExcludeHealers | StrategyPartyFiltering.ExcludeMelee | StrategyPartyFiltering.ExcludeRanged)) != StrategyPartyFiltering.None)
         {
-            players = players.Where(p => p.Role switch
-            {
-                Role.Tank => !filter.HasFlag(StrategyPartyFiltering.ExcludeTanks),
-                Role.Healer => !filter.HasFlag(StrategyPartyFiltering.ExcludeHealers),
-                Role.Melee => !filter.HasFlag(StrategyPartyFiltering.ExcludeMelee),
-                Role.Ranged => !filter.HasFlag(StrategyPartyFiltering.ExcludeRanged),
-                _ => true,
-            });
+            return null;
         }
-        return players;
+
+        Actor? best = null;
+        var bestHP = uint.MaxValue;
+        for (var slot = 0; slot < PartyState.MaxAllies; ++slot)
+        {
+            var player = allowedMask[slot] ? WorldState.Party[slot] : null;
+            if (player == null || player.IsDead)
+                continue;
+
+            var excluded = player.Role switch
+            {
+                Role.Tank => filter.HasFlag(StrategyPartyFiltering.ExcludeTanks),
+                Role.Healer => filter.HasFlag(StrategyPartyFiltering.ExcludeHealers),
+                Role.Melee => filter.HasFlag(StrategyPartyFiltering.ExcludeMelee),
+                Role.Ranged => filter.HasFlag(StrategyPartyFiltering.ExcludeRanged),
+                _ => false,
+            };
+            if (excluded || best != null && player.HPMP.CurHP >= bestHP)
+            {
+                continue;
+            }
+
+            best = player;
+            bestHP = player.HPMP.CurHP;
+        }
+        return best;
     }
 
-    private Func<AIHints.Enemy, float> RateEnemy(StrategyEnemySelection criterion) => criterion switch
+    private Actor? ResolvePriorityEnemy(StrategyEnemySelection criterion)
     {
-        StrategyEnemySelection.Closest => Player != null ? e => -(e.Actor.Position - Player.Position).LengthSq() : _ => 0,
-        StrategyEnemySelection.LowestCurHP => e => -e.Actor.HPMP.CurHP,
-        StrategyEnemySelection.HighestCurHP => e => e.Actor.HPMP.CurHP,
-        StrategyEnemySelection.LowestMaxHP => e => -e.Actor.HPMP.MaxHP,
-        StrategyEnemySelection.HighestMaxHP => e => e.Actor.HPMP.MaxHP,
-        _ => _ => 0
-    };
+        var player = Player;
+        AIHints.Enemy? best = null;
+        var bestRating = default(float);
+        var priorityTargets = Hints.PriorityTargetsSpan;
+        var len = priorityTargets.Length;
+        for (var i = 0; i < len; ++i)
+        {
+            var enemy = priorityTargets[i];
+            var rating = criterion switch
+            {
+                StrategyEnemySelection.Closest => player != null ? -player.DistanceToHitbox(enemy.Actor) : 0f,
+                StrategyEnemySelection.LowestCurHP => -enemy.Actor.HPMP.CurHP,
+                StrategyEnemySelection.HighestCurHP => enemy.Actor.HPMP.CurHP,
+                StrategyEnemySelection.LowestMaxHP => -enemy.Actor.HPMP.MaxHP,
+                StrategyEnemySelection.HighestMaxHP => enemy.Actor.HPMP.MaxHP,
+                _ => 0f
+            };
+            if (best == null || rating.CompareTo(bestRating) > 0)
+            {
+                best = enemy;
+                bestRating = rating;
+            }
+        }
+        return best?.Actor;
+    }
+
+    private Actor? ResolveEnemyByOID(uint oid)
+    {
+        var player = Player;
+        if (player == null || oid == 0u)
+        {
+            return null;
+        }
+
+        Actor? best = null;
+        var bestDistanceSq = float.MaxValue;
+        var targets = Hints.PotentialTargets;
+        var count = targets.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            var enemy = targets[i];
+            if (enemy.Actor.OID != oid)
+            {
+                continue;
+            }
+
+            var distanceSq = (enemy.Actor.Position - player.Position).LengthSq();
+            if (best == null || distanceSq.CompareTo(bestDistanceSq) < 0f)
+            {
+                best = enemy.Actor;
+                bestDistanceSq = distanceSq;
+            }
+        }
+        return best;
+    }
 
     private Plan? CalculateExpectedPlan()
     {
@@ -218,13 +327,25 @@ public sealed class RotationModuleManager : IDisposable
         if (player != null)
         {
             var isRPMode = player.Statuses.Any(IsTransformStatus);
-            for (int i = 0; i < modules.Count; ++i)
+            var count = modules.Count;
+            for (var i = 0; i < count; ++i)
             {
                 var def = modules[i].Definition;
                 if (!def.Classes[(int)player.Class] || player.Level < def.MinLevel || player.Level > def.MaxLevel)
                     continue;
                 if (!def.CanUseWhileRoleplaying && isRPMode)
                     continue;
+
+                var compat = def.PvP switch
+                {
+                    PvPCompatibility.None => !WorldState.IsPvPArea,
+                    PvPCompatibility.PvPOnly => WorldState.IsPvPArea,
+                    _ => true
+                };
+
+                if (!compat)
+                    continue;
+
                 res.Add(new(i, def, modules[i].Builder(this, player)));
             }
         }
@@ -265,7 +386,13 @@ public sealed class RotationModuleManager : IDisposable
             Service.Log($"[RMM] Player ninja pulled => force-disabling from '{Preset?.Name ?? "<n/a>"}'");
             Preset = ForceDisable;
         }
-        // if player enters combat when countdown is either not active or around zero, proceed normally - if override is queued, let it run, otherwise let plan run
+
+        // some jank: we can't check value of this.Planner because the expected plan isn't loaded until either countdown starts or boss is pulled, and BMM doesn't activate the module until after this event fires, so the best we can do is check what the plan is expected to be
+        else if (actor.InCombat && WorldState.Client.CountdownRemaining == null && Config.PlannedPullSafety && Bossmods.LoadedModules is [var mod] && Database.Plans.GetPlans(mod.GetType(), actor.Class).SelectedIndex >= 0)
+        {
+            Service.Log($"[RMM] Boss pulled without countdown => force-disabling from '{Preset?.Name}'");
+            Preset = ForceDisable;
+        }
     }
 
     private void OnDeadChanged(Actor actor)
@@ -322,5 +449,198 @@ public sealed class RotationModuleManager : IDisposable
             Service.Log($"[RMM] Luring Trap triggered, force-disabling autorotation'");
             Preset = ForceDisable;
         }
+
+        if (actor.InstanceID == PlayerInstanceId)
+        {
+            LoSFix = null; // successful cast means we're not stuck anymore
+        }
+    }
+
+    private void OnLoSFailed(ClientState.OpActionFailedLoS op)
+    {
+        if (!WantsLoSFix)
+        {
+            LoSFix = null;
+            return;
+        }
+
+        if (Hints.PathfindMapObstacles.Bitmap is null)
+            return;
+
+        // don't reevaluate if there's one fix for current target. Performance cost is huge
+        if (LoSFix?.TargetID == op.TargetId)
+            return;
+
+        if (Player is null || WorldState.Actors.Find(op.TargetId) is not { } target)
+        {
+            LoSFix = null;
+            return;
+        }
+
+        var dest = FindLosDestination(Hints.PathfindMapObstacles, Hints.PathfindMapCenter, Player, target, out var _);
+        LoSFix = dest != null ? new(op.TargetId, Player.Position, dest.Value) : null;
+    }
+
+    private static WPos? FindLosDestination(Bitmap.Region obstacleRegion, WPos mapCenter, Actor player, Actor target, out string debug)
+    {
+        var map = obstacleRegion.Bitmap!;
+        var w = map.Width;
+        var h = map.Height;
+        if (w <= 0 || h <= 0)
+        {
+            debug = $"invalid-map-size={w}x{h}";
+            return null;
+        }
+
+        // clamp to nearest in-bounds cell
+        var centerCellX = (obstacleRegion.Rect.Left + obstacleRegion.Rect.Right) * 0.5f;
+        var centerCellY = (obstacleRegion.Rect.Top + obstacleRegion.Rect.Bottom) * 0.5f;
+        var invRes = 1.0f / map.PixelSize;
+        var delta = (player.Position - mapCenter) * invRes;
+        var sx = (int)MathF.Round(centerCellX + delta.X);
+        var sy = (int)MathF.Round(centerCellY + delta.Z);
+        sx = Math.Clamp(sx, 0, w - 1);
+        sy = Math.Clamp(sy, 0, h - 1);
+
+        var visited = new bool[w * h];
+        var q = new Queue<(int x, int y)>();
+        var pass1Visited = 0;
+        var pass1BitmapReject = 0;
+        var pass1RayReject = 0;
+        var pass2Visited = 0;
+        var pass2RayReject = 0;
+        var startPos = obstacleRegion.CellCenterToWorld(mapCenter, sx, sy);
+        var startRayLoS = HasLineOfSightFrom(startPos, player.PosRot.Y, target);
+        var startBitmapLoS = obstacleRegion.HasObstacleMapLineOfSight(mapCenter, startPos, target.Position);
+        bool Passable(int x, int y) => (uint)x < (uint)w && (uint)y < (uint)h && !map[x, y];
+
+        void Enqueue(int x, int y)
+        {
+            if (!Passable(x, y))
+                return;
+            ref var slot = ref visited[y * w + x];
+            if (slot)
+                return;
+            slot = true;
+            q.Enqueue((x, y));
+        }
+
+        bool SeedFromNearestPassable(out int seededCount)
+        {
+            seededCount = 0;
+            Enqueue(sx, sy);
+            if (q.Count > 0)
+            {
+                seededCount = q.Count;
+                return true;
+            }
+
+            // start can be blocked, grow until passable seed found
+            var maxR = Math.Max(w, h);
+            for (var r = 1; r < maxR; ++r)
+            {
+                var any = false;
+                var xmin = sx - r;
+                var xmax = sx + r;
+                var ymin = sy - r;
+                var ymax = sy + r;
+
+                for (var x = xmin; x <= xmax; ++x)
+                {
+                    var before = q.Count;
+                    Enqueue(x, ymin);
+                    Enqueue(x, ymax);
+                    any |= q.Count != before;
+                }
+                for (var y = ymin + 1; y < ymax; ++y)
+                {
+                    var before = q.Count;
+                    Enqueue(xmin, y);
+                    Enqueue(xmax, y);
+                    any |= q.Count != before;
+                }
+                if (any)
+                {
+                    seededCount = q.Count;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if (!SeedFromNearestPassable(out var seededPass1))
+        {
+            debug = $"seed-failed start=({sx},{sy}) start-passable={Passable(sx, sy)} start-ray={startRayLoS} start-bitmap={startBitmapLoS}";
+            return null;
+        }
+
+        // check bitmap los + raycast los
+        while (q.Count > 0)
+        {
+            var (x, y) = q.Dequeue();
+            ++pass1Visited;
+            var wpos = obstacleRegion.CellCenterToWorld(mapCenter, x, y);
+            var bitmapOK = obstacleRegion.HasObstacleMapLineOfSight(mapCenter, wpos, target.Position);
+            var rayOK = HasLineOfSightFrom(wpos, player.PosRot.Y, target);
+            if (!bitmapOK)
+                ++pass1BitmapReject;
+            if (!rayOK)
+                ++pass1RayReject;
+            if ((x != sx || y != sy) && bitmapOK && rayOK)
+            {
+                debug = $"ok-pass1 start=({sx},{sy}) seed1={seededPass1} p1v={pass1Visited} p1b-rej={pass1BitmapReject} p1r-rej={pass1RayReject}";
+                return obstacleRegion.CellCenterToWorld(mapCenter, x, y);
+            }
+
+            Enqueue(x + 1, y);
+            Enqueue(x - 1, y);
+            Enqueue(x, y + 1);
+            Enqueue(x, y - 1);
+        }
+
+        Array.Clear(visited, 0, visited.Length);
+        q.Clear();
+        if (!SeedFromNearestPassable(out var seededPass2))
+        {
+            debug = $"seed2-failed start=({sx},{sy}) pass1-visited={pass1Visited} b-reject={pass1BitmapReject} r-reject={pass1RayReject}";
+            return null;
+        }
+
+        // in case the bitmap is shit, just do raycast only
+        while (q.Count > 0)
+        {
+            var (x, y) = q.Dequeue();
+            ++pass2Visited;
+            var wpos = obstacleRegion.CellCenterToWorld(mapCenter, x, y);
+            var rayOK = HasLineOfSightFrom(wpos, player.PosRot.Y, target);
+            if (!rayOK)
+                ++pass2RayReject;
+            if ((x != sx || y != sy) && rayOK)
+            {
+                debug = $"ok-pass2 start=({sx},{sy}) seed1={seededPass1} p1v={pass1Visited} p1b-rej={pass1BitmapReject} p1r-rej={pass1RayReject} seed2={seededPass2} p2v={pass2Visited} p2r-rej={pass2RayReject}";
+                return obstacleRegion.CellCenterToWorld(mapCenter, x, y);
+            }
+
+            Enqueue(x + 1, y);
+            Enqueue(x - 1, y);
+            Enqueue(x, y + 1);
+            Enqueue(x, y - 1);
+        }
+
+        debug = $"null start=({sx},{sy}) passable={Passable(sx, sy)} start-ray={startRayLoS} start-bitmap={startBitmapLoS} seed1={seededPass1} p1v={pass1Visited} p1b-rej={pass1BitmapReject} p1r-rej={pass1RayReject} seed2={seededPass2} p2v={pass2Visited} p2r-rej={pass2RayReject}";
+        return null;
+    }
+
+    // FIXME: shouldn't be using ffi stuff in this module
+    private static bool HasLineOfSightFrom(WPos from, float sourceY, Actor target)
+    {
+        var sourcePos = from.ToVec3(sourceY + 2);
+        var targetPos = target.Position.ToVec3(target.PosRot.Y + 2);
+        var offset = targetPos - sourcePos;
+        var maxDist = offset.Length();
+        if (maxDist <= 1e-3f)
+            return true;
+        var direction = offset / maxDist;
+        return !BGCollisionModule.RaycastMaterialFilter(sourcePos, direction, out _, maxDist);
     }
 }

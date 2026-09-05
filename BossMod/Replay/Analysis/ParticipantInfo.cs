@@ -40,9 +40,13 @@ sealed class ParticipantInfo : CommonEnumInfo
                         data.Names.AddRange(p.NameHistory.Values);
 
                         if (p.ExistsInWorldAt(enc.Time.Start))
+                        {
                             ++spawnedPreFight;
+                        }
                         else
+                        {
                             data.SpawnedMidFight = true;
+                        }
 
                         data.SeenTargetable |= p.TargetableHistory.Count > 0;
                         data.MinRadius = Math.Min(data.MinRadius, p.MinRadius);
@@ -77,7 +81,7 @@ sealed class ParticipantInfo : CommonEnumInfo
     {
         UITree.NodeProperties map(KeyValuePair<uint, ParticipantData> kv)
         {
-            var name = _oidType?.GetEnumName(kv.Key);
+            var name = _oidType?.GeneratedEnumName(kv.Key);
             var typeName = kv.Value.Types.Count switch
             {
                 0 => "???",
@@ -86,16 +90,25 @@ sealed class ParticipantInfo : CommonEnumInfo
             };
             // for global, highlight by targetable; for encounter, highlight by being defined in enum
             var highlight = _oidType != null ? name == null : !kv.Value.SeenTargetable;
-            return new($"{kv.Key:X} ({_oidType?.GetEnumName(kv.Key)}) '{kv.Value.Names.FirstOrDefault().name}' ({typeName})", false, highlight ? Colors.TextColor2 : Colors.TextColor1);
+            return new($"{kv.Key:X} ({_oidType?.GeneratedEnumName(kv.Key)}) '{kv.Value.Names.FirstOrDefault().name}' ({typeName})", false, highlight ? Colors.TextColor2 : Colors.TextColor1);
         }
         foreach (var (oid, data) in tree.Nodes(_data, map, kv => DrawSubContextMenu(kv.Key, kv.Value)))
         {
             foreach (var n in tree.Node($"Types ({data.Types.Count})", data.Types.Count == 0))
+            {
                 tree.LeafNodes(data.Types, t => t.ToString());
+            }
+
             foreach (var n in tree.Node($"Zones ({data.Zones.Count})", data.Zones.Count == 0))
+            {
                 tree.LeafNodes(data.Zones, z => $"{z.zoneId} '{Service.LuminaRow<TerritoryType>(z.zoneId)?.PlaceName.ValueNullable?.Name}' (cfc={z.cfcId})");
+            }
+
             foreach (var n in tree.Node($"Names ({data.Names.Count})", data.Names.Count == 0))
+            {
                 tree.LeafNodes(data.Names, n => $"[{n.id}] {n.name}");
+            }
+
             tree.LeafNode($"Spawned pre fight: {string.Join(", ", data.SpawnedPreFight)}");
             tree.LeafNode($"Spawned mid fight: {data.SpawnedMidFight}");
             tree.LeafNode($"Radius: {RadiusString(data)}");
@@ -113,7 +126,7 @@ sealed class ParticipantInfo : CommonEnumInfo
         if (ImGui.MenuItem("Generate missing enum values for boss module"))
         {
             var sb = new StringBuilder();
-            foreach (var (name, val) in Utils.DedupKeys(_data.Where(kv => _oidType?.GetEnumName(kv.Key) == null).Select(d => EnumMemberString(d.Key, d.Value))))
+            foreach (var (name, val) in Utils.DedupKeys(_data.Where(kv => _oidType?.GeneratedEnumName(kv.Key) == null).Select(d => EnumMemberString(d.Key, d.Value))))
             {
                 sb.AppendLine($"{name} = {val}");
             }
@@ -139,7 +152,9 @@ sealed class ParticipantInfo : CommonEnumInfo
             }
         }
         foreach (var curOID in toDel)
+        {
             _data.Remove(curOID);
+        }
     }
 
     private void DrawSubContextMenu(uint oid, ParticipantData data)
@@ -160,7 +175,7 @@ sealed class ParticipantInfo : CommonEnumInfo
 
     private (string Name, string Value) EnumMemberString(uint oid, ParticipantData data, string? forcedName = null)
     {
-        var enumName = forcedName ?? _oidType?.GetEnumName(oid) ?? ("_Gen_" + GuessName(oid, data));
+        var enumName = forcedName ?? _oidType?.GeneratedEnumName(oid) ?? ("_Gen_" + GuessName(oid, data));
         var spawnStr = data.SpawnedPreFight.Count switch
         {
             0 => "?",
@@ -168,7 +183,10 @@ sealed class ParticipantInfo : CommonEnumInfo
             _ => $"{data.SpawnedPreFight[0]}-{data.SpawnedPreFight[^1]}",
         };
         if (data.SpawnedMidFight)
+        {
             spawnStr += " (spawn during fight)";
+        }
+
         var typeStr = data.Types.Count switch
         {
             0 => ", ??? type",
@@ -185,7 +203,10 @@ sealed class ParticipantInfo : CommonEnumInfo
         sb.AppendLine("public enum OID : uint");
         sb.AppendLine("{");
         foreach (var (key, val) in Utils.DedupKeys(members))
+        {
             sb.AppendLine($"    {key} = {val}");
+        }
+
         sb.AppendLine("}");
         return sb;
     }
@@ -205,9 +226,14 @@ sealed class ParticipantInfo : CommonEnumInfo
         sb.AppendLine($"    public {name}States(BossModule module) : base(module)");
         sb.AppendLine("    {");
         if (withStates)
+        {
             sb.AppendLine($"        DeathPhase(default, SinglePhase);");
+        }
         else
+        {
             sb.AppendLine($"        TrivialPhase();");
+        }
+
         sb.AppendLine("    }");
         if (withStates)
         {
@@ -221,23 +247,9 @@ sealed class ParticipantInfo : CommonEnumInfo
         }
         sb.AppendLine("}");
         sb.AppendLine();
-        sb.AppendLine("[ModuleInfo(BossModuleInfo.Maturity.WIP,");
-        sb.AppendLine($"StatesType = typeof({name}States),");
-        sb.AppendLine($"ConfigType = null, // replace null with typeof({name}Config) if applicable");
-        sb.AppendLine("ObjectIDType = typeof(OID),");
-        sb.AppendLine("ActionIDType = null, // replace null with typeof(AID) if applicable");
-        sb.AppendLine("StatusIDType = null, // replace null with typeof(SID) if applicable");
-        sb.AppendLine("TetherIDType = null, // replace null with typeof(TetherID) if applicable");
-        sb.AppendLine("IconIDType = null, // replace null with typeof(IconID) if applicable");
-        sb.AppendLine($"PrimaryActorOID = (uint)OID.{name},");
-        sb.AppendLine("Contributors = \"\",");
-        sb.AppendLine("Expansion = BossModuleInfo.Expansion.Placeholder,");
-        sb.AppendLine("Category = BossModuleInfo.Category.Placeholder,");
-        sb.AppendLine("GroupType = BossModuleInfo.GroupType.CFC,");
-        sb.AppendLine($"GroupID = {(data.Zones.Count != 0 ? data.Zones[0].cfcId : default)}u,");
-        sb.AppendLine($"NameID = {(data.Names.Count != 0 ? data.Names[0].id : default)}u,");
-        sb.AppendLine("SortOrder = 1,");
-        sb.AppendLine("PlanLevel = 0)]");
+        sb.AppendLine($"[ModuleInfo(BossModuleInfo.Maturity.WIP, PrimaryActorOID = (uint)OID.{name}, Contributors = \"\",");
+        sb.AppendLine("Category = BossModuleInfo.Category.Placeholder, GroupType = BossModuleInfo.GroupType.CFC,");
+        sb.AppendLine($"GroupID = {(data.Zones.Count != 0 ? data.Zones[0].cfcId : default)}u, NameID = {(data.Names.Count != 0 ? data.Names[0].id : default)}u, SortOrder = 1)]");
         sb.AppendLine("[SkipLocalsInit]");
         sb.AppendLine($"public sealed class {name}(WorldState ws, Actor primary) : BossModule(ws, primary, new(100f, 100f), new ArenaBoundsCircle(20f));");
         return sb;

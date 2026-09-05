@@ -22,7 +22,9 @@ abstract class PetrifactionCommon(BossModule module) : Components.GenericGaze(mo
     public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor)
     {
         if (ActiveGorgons.Count <= NumCasts)
+        {
             return [];
+        }
 
         var gorgons = ActiveGorgons;
         var maxActivation = gorgons[NumCasts].activation.AddSeconds(1d);
@@ -31,12 +33,16 @@ abstract class PetrifactionCommon(BossModule module) : Components.GenericGaze(mo
         for (var i = NumCasts; i < countG; ++i)
         {
             if (gorgons[i].activation >= maxActivation)
+            {
                 break;
+            }
             ++count;
         }
 
         if (count == 0)
+        {
             return [];
+        }
 
         var eyes = new Eye[count];
         var index = 0;
@@ -44,7 +50,8 @@ abstract class PetrifactionCommon(BossModule module) : Components.GenericGaze(mo
         for (var i = NumCasts; i < countG && gorgons[i].activation < maxActivation; ++i)
         {
             var gorgon = gorgons[i];
-            eyes[index++] = new(gorgon.caster.Position, gorgon.activation);
+            var loc = gorgon.caster.Position.Quantized();
+            eyes[index++] = new(loc, gorgon.activation, eyeCenter: loc);
         }
         return eyes;
     }
@@ -102,6 +109,6 @@ abstract class PetrifactionCommon(BossModule module) : Components.GenericGaze(mo
         }
     }
 
-    public void DrawPetrify(Actor source, bool delayed) => Arena.AddCone(source.Position, 25f, source.Rotation, 45f.Degrees(), delayed ? Colors.Safe : default);
-    public void DrawExplode(Actor source, bool delayed) => Arena.AddCircle(source.Position, 5f, delayed ? Colors.Safe : default);
+    public void DrawPetrify(Actor source, bool delayed) => Arena.ZoneConeOutline(source.Position, 0f, 25f, source.Rotation, 45f.Degrees(), delayed ? Colors.Safe : default);
+    public void DrawExplode(Actor source, bool delayed) => Arena.ZoneCircleOutline(source.Position, 5f, delayed ? Colors.Safe : default);
 }

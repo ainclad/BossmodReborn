@@ -42,7 +42,10 @@ sealed class TetherInfo : CommonEnumInfo
         {
             _plot.Begin();
             foreach (var i in _points)
+            {
                 _plot.Point(i.startEnd, 0xff808080, i.inst.TimestampString);
+            }
+
             _plot.End();
         }
     }
@@ -82,7 +85,7 @@ sealed class TetherInfo : CommonEnumInfo
     {
         UITree.NodeProperties map(KeyValuePair<uint, TetherData> kv)
         {
-            var name = _tidType?.GetEnumName(kv.Key);
+            var name = _tidType?.GeneratedEnumName(kv.Key);
             return new($"{kv.Key} ({name})", false, name == null ? Colors.TextColor2 : Colors.TextColor1);
         }
         foreach (var (tid, data) in tree.Nodes(_data, map))
@@ -108,7 +111,10 @@ sealed class TetherInfo : CommonEnumInfo
         {
             var sb = new StringBuilder("public enum TetherID : uint\n{\n");
             foreach (var (tid, data) in _data)
+            {
                 sb.Append($"    {EnumMemberString(tid, data)}\n");
+            }
+
             sb.Append("}\n");
             ImGui.SetClipboardText(sb.ToString());
         }
@@ -116,8 +122,11 @@ sealed class TetherInfo : CommonEnumInfo
         if (ImGui.MenuItem("Generate missing enum values for boss module"))
         {
             var sb = new StringBuilder();
-            foreach (var (tid, data) in _data.Where(kv => _tidType?.GetEnumName(kv.Key) == null))
+            foreach (var (tid, data) in _data.Where(kv => _tidType?.GeneratedEnumName(kv.Key) == null))
+            {
                 sb.AppendLine(EnumMemberString(tid, data));
+            }
+
             ImGui.SetClipboardText(sb.ToString());
         }
     }
@@ -126,7 +135,7 @@ sealed class TetherInfo : CommonEnumInfo
     {
         string generateTetherName() => Service.LuminaRow<Channeling>(tid)?.File.ToString() ?? tid.ToString();
 
-        var name = _tidType?.GetEnumName(tid) ?? $"_Gen_Tether_{generateTetherName()}";
+        var name = _tidType?.GeneratedEnumName(tid) ?? $"_Gen_Tether_{generateTetherName()}";
         return $"{name} = {tid}, // {OIDListString(data.SourceOIDs)}->{OIDListString(data.TargetOIDs)}";
     }
 }

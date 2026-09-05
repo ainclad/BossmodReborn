@@ -67,6 +67,7 @@ public enum AID : uint
     SmokeScreen = 7816,
     MagitekPulse = 7962, // MarkXLIIIMiniCannon->location, 1.0s cast, range 6 circle, Castrum Abania, 1st boss
     AethericSiphon = 9102,
+    Vril = 9345,
     Shatterstone = 9823,
     Deflect = 10006,
     DeflectVeryEasy = 18863,
@@ -82,6 +83,10 @@ public enum AID : uint
     VariantCure2 = 33862, // available in mount rokkon and aloalo island
     VariantSpiritDart2 = 33863, // available in mount rokkon and aloalo island
     VariantRampart2 = 33864, // available in mount rokkon and aloalo island
+    VariantCure3 = 46939, // available in merchant's tale
+    VariantSpiritDart3 = 46940, // available in merchant's tale
+    VariantRampart3 = 46941, // available in merchant's tale
+    VariantEagleEyeShot = 46942, // available in merchant's tale
 
     #region PvP
     ElixirPvP = 29055,
@@ -135,6 +140,8 @@ public enum SID : uint
     Raise = 148, // applied by Raise to target
 
     // Variant
+    EnmityUp = 3358, // applied by Variant Ultimatum to self, budget tank stance
+    SustainedDamage = 3359, // applied by Variant Spirit Dart to targets
     VulnerabilityDown = 3360, // applied by Variant Rampart to self
 
     // Bozja
@@ -176,11 +183,11 @@ public enum SID : uint
     DiabrosisEquippedPvP = 4497,
 }
 
-public sealed class Definitions : IDisposable
+public sealed class Definitions : Defs
 {
     private readonly SharedActionsConfig _config = Service.Config.Get<SharedActionsConfig>();
 
-    public Definitions(ActionDefinitions d)
+    public override void Define(ActionDefinitions d)
     {
         #region PvE
         d.RegisterSpell(AID.Sprint);
@@ -238,6 +245,7 @@ public sealed class Definitions : IDisposable
         d.RegisterSpell(AID.MagitekPulse);
         d.RegisterSpell(AID.SmokeScreen);
         d.RegisterSpell(AID.AethericSiphon);
+        d.RegisterSpell(AID.Vril);
         d.RegisterSpell(AID.Shatterstone);
         d.RegisterSpell(AID.Deflect);
         d.RegisterSpell(AID.DeflectVeryEasy);
@@ -253,6 +261,10 @@ public sealed class Definitions : IDisposable
         d.RegisterSpell(AID.VariantCure2);
         d.RegisterSpell(AID.VariantSpiritDart2);
         d.RegisterSpell(AID.VariantRampart2);
+        d.RegisterSpell(AID.VariantCure3);
+        d.RegisterSpell(AID.VariantSpiritDart3);
+        d.RegisterSpell(AID.VariantRampart3);
+        d.RegisterSpell(AID.VariantEagleEyeShot);
         #endregion
 
         #region PvP
@@ -281,20 +293,35 @@ public sealed class Definitions : IDisposable
         #endregion
 
         #region Phantom actions
-        foreach (var action in typeof(PhantomID).GetEnumValues())
+        foreach (var action in typeof(PhantomID).GeneratedEnumValues())
+        {
             if ((uint)action > 0)
+            {
                 d.RegisterSpell((PhantomID)action);
+            }
+        }
         #endregion
 
         Customize(d);
     }
 
-    public void Dispose() { }
-
     private void Customize(ActionDefinitions d)
     {
-        d.Spell(AID.Interject)!.ForbidExecute = (_, _, act, _) => !(act.Target?.CastInfo?.Interruptible ?? false); // don't use interject if target is not casting interruptible spell
-        d.Spell(AID.Reprisal)!.ForbidExecute = (_, player, _, hints) => !hints.PotentialTargets.Any(e => e.Actor.Position.InCircle(player.Position, 5 + e.Actor.HitboxRadius)); // don't use reprisal if no one would be hit; TODO: consider checking only target?..
+        d.Spell(AID.Interject)!.AllowExecute = static (_, _, act, _) => act.Target is { CastInfo.Interruptible: true }; // don't use interject if target is not casting interruptible spell
+        d.Spell(AID.HeadGraze)!.AllowExecute = static (_, _, act, _) => act.Target is { CastInfo.Interruptible: true };
+
+        d.Spell(AID.Reprisal)!.AllowExecute = static (_, player, _, hints) =>
+        {
+            var pos = player.Position;
+            foreach (var e in hints.PotentialTargets)
+            {
+                if (e.Actor.Position.InCircle(pos, 5f + e.Actor.HitboxRadius) && e.Priority >= AIHints.Enemy.PriorityPointless)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }; // don't use reprisal if no one would be hit; TODO: consider checking only target?
         d.Spell(AID.Shirk)!.SmartTarget = ActionDefinitions.SmartTargetCoTank;
 
         //d.Spell(AID.Repose)!.EffectDuration = 30;
@@ -304,8 +331,7 @@ public sealed class Definitions : IDisposable
         //d.Spell(AID.Feint)!.EffectDuration = 10;
         //d.Spell(AID.TrueNorth)!.EffectDuration = 10;
 
-        d.Spell(AID.Peloton)!.ForbidExecute = (_, player, _, _) => player.InCombat;
-        d.Spell(AID.HeadGraze)!.ForbidExecute = (_, _, act, _) => !(act.Target?.CastInfo?.Interruptible ?? false);
+        d.Spell(AID.Peloton)!.AllowExecute = static (_, player, _, _) => !player.InCombat;
 
         //d.Spell(AID.Addle)!.EffectDuration = 10;
         //d.Spell(AID.Sleep)!.EffectDuration = 30;
@@ -315,21 +341,31 @@ public sealed class Definitions : IDisposable
         //d.Spell(AID.Surecast)!.EffectDuration = 6;
 
         // regular dash check doesn't work since this one is awkwardly fixed distance
-        d.Spell(PhantomID.PhantomKick)!.ForbidExecute = (_, player, action, hints) =>
+        d.Spell(PhantomID.PhantomKick)!.AllowExecute = static (_, player, action, hints) =>
         {
             var cfg = Service.Config.Get<ActionTweaksConfig>();
             var target = action.Target;
             if (target == null || !cfg.DashSafety)
-                return false;
+            {
+                return true;
+            }
 
             if (player.PendingKnockbacks.Count > 0)
-                return true;
+            {
+                return false;
+            }
 
             var dir = player.DirectionTo(target).Normalized() * 15;
-            return ActionDefinitions.IsDashDangerous(player.Position, player.Position + dir, hints);
+            return ActionPredicate.IsDashSafe(player.Position, player.Position + dir, hints);
         };
 
-        d.Spell(PhantomID.OccultFeatherfoot)!.ForbidExecute = ActionDefinitions.DashFixedDistanceCheck(15);
-        d.Spell(PhantomID.OccultFeatherfoot)!.TransformAngle = (ws, _, _, _) => _config.AlignDashToCamera ? ws.Client.CameraAzimuth + 180.Degrees() : null;
+        d.Spell(PhantomID.OccultFeatherfoot)!.AllowExecute = ActionPredicate.AllowDashFixed(15f);
+        d.Spell(PhantomID.OccultFeatherfoot)!.TransformAngle = (ws, _, _) => _config.AlignDashToCamera ? ws.Client.CameraAzimuth + 180.Degrees() : null;
+
+        d.Spell(PhantomID.StepForth)!.AllowExecute = ActionPredicate.AllowDashToPosition;
+        d.Spell(PhantomID.StepForth)!.TransformAngle = (ws, _, _) => _config.AlignDashToCamera ? ws.Client.CameraAzimuth + 180f.Degrees() : null;
+
+        // Occult Jump has a ridiculous position lock of almost 2.5s
+        d.Spell(PhantomID.OccultJump)!.AllowExecute = (_, player, _, hints) => !hints.ForbiddenZones.Any(z => z.shapeDistance.Contains(player.Position));
     }
 }

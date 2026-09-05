@@ -70,7 +70,7 @@ sealed class ScathingSweep(BossModule module) : Components.SimpleAOEs(module, (u
 
 sealed class HoppingMad(BossModule module) : Components.GenericAOEs(module)
 {
-    private readonly List<AOEInstance> _aoes = new(4);
+    private readonly List<AOEInstance> _aoes = [with(4)];
     private static readonly AOEShapeCircle circleSmall = new(8f), circleMedium = new(16f), circleBig = new(24f);
     private static readonly AOEShapeDonut donutSmall = new(8f, 60f), donutMedium = new(16f, 60f), donutBig = new(24, 60f);
     private readonly HeatedOutburst _aoe = module.FindComponent<HeatedOutburst>()!;
@@ -192,7 +192,7 @@ sealed class CE107UnbridledStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018, NameID = 35)]
+[ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CriticalEngagement, GroupID = 1018u, NameID = 35u)]
 public sealed class CE107Unbridled(WorldState ws, Actor primary) : BossModule(ws, primary, startingArena.Center, startingArena)
 {
     private static readonly ArenaBoundsCustom startingArena = new([new Polygon(new(620f, 800f), 29.5f, 32)]);

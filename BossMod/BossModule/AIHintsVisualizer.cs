@@ -5,7 +5,6 @@ using System.Diagnostics;
 
 namespace BossMod;
 
-[SkipLocalsInit]
 public sealed class AIHintsVisualizer(AIHints hints, WorldState ws, Actor player, float preferredDistance, float cushionSize)
 {
     private readonly MapVisualizer?[] _zoneVisualizers = new MapVisualizer?[hints.ForbiddenZones.Count];
@@ -34,14 +33,14 @@ public sealed class AIHintsVisualizer(AIHints hints, WorldState ws, Actor player
 
         foreach (var _1 in tree.Node("Potential targets", hints.PotentialTargets.Count == 0))
         {
-            tree.LeafNodes(hints.PotentialTargets, e => $"[{e.Priority}] {e.Actor} (str={e.AttackStrength:f2}), dist={(e.Actor.Position - player.Position).Length():f2}, tank={e.ShouldBeTanked}/{e.PreferProvoking}/{e.DesiredPosition}/{e.DesiredRotation}, forbid dots={e.ForbidDOTs}");
+            tree.LeafNodes(hints.PotentialTargets, e => $"[{e.Priority}] {e.Actor} (str={e.AttackStrength:f2}), dist={e.Actor.DistanceToHitbox(player):f2}, tank={e.ShouldBeTanked}/{e.PreferProvoking}/{e.DesiredPosition}/{e.DesiredRotation}, forbid dots={e.ForbidDOTs}");
         }
         tree.LeafNode($"Forced target: {hints.ForcedTarget}{((hints.ForcedTarget?.IsTargetable ?? true) ? "" : " (untargetable)")}");
         tree.LeafNode($"Forced movement: {hints.ForcedMovement} (misdirection threshold={hints.MisdirectionThreshold})");
         tree.LeafNode($"Special movement: {hints.ImminentSpecialMode.mode} in {Math.Max(0, (hints.ImminentSpecialMode.activation - ws.CurrentTime).TotalSeconds):f3}s");
         foreach (var _1 in tree.Node("Forbidden zones", hints.ForbiddenZones.Count == 0))
         {
-            for (int i = 0; i < hints.ForbiddenZones.Count; ++i)
+            for (var i = 0; i < hints.ForbiddenZones.Count; ++i)
             {
                 foreach (var _2 in tree.Node($"[{i}] activated at {Math.Max(0, (hints.ForbiddenZones[i].activation - ws.CurrentTime).TotalSeconds):f3}"))
                 {
@@ -56,7 +55,22 @@ public sealed class AIHintsVisualizer(AIHints hints, WorldState ws, Actor player
         }
         foreach (var _1 in tree.Node("Predicted damage", hints.PredictedDamage.Count == 0))
         {
-            tree.LeafNodes(hints.PredictedDamage, d => $"[{string.Join(", ", ws.Party.WithSlot().IncludedInMask(d.Players).Select(ia => ia.Item2.Name))}] ({d.Type}), at {Math.Max(0, (d.Activation - ws.CurrentTime).TotalSeconds):f3}");
+            tree.LeafNodes(hints.PredictedDamage, d =>
+            {
+                var names = new StringBuilder();
+                var first = true;
+                foreach (var (_, p) in ws.Party.WithSlot().IncludedInMask(d.Players))
+                {
+                    if (!first)
+                    {
+                        names.Append(", ");
+                    }
+
+                    names.Append(p.Name);
+                    first = false;
+                }
+                return $"[{names}] ({d.Type}), at {Math.Max(0, (d.Activation - ws.CurrentTime).TotalSeconds):f3}";
+            });
         }
         foreach (var _1 in tree.Node("Party health"))
         {
@@ -98,7 +112,7 @@ public sealed class AIHintsVisualizer(AIHints hints, WorldState ws, Actor player
     private void RunBenchmark(int iterations)
     {
         // Avoid skew from an accidental retained added goal zone; restore after run.
-        var originalGoalZones = hints.GoalZones.ToList();
+        var originalGoalZones = new List<Func<WPos, float>>(hints.GoalZones);
         double sumPath = 0d, sumRaster = 0d, sumTotal = 0d;
         double minTotal = double.MaxValue, maxTotal = 0d;
 
@@ -119,8 +133,8 @@ public sealed class AIHintsVisualizer(AIHints hints, WorldState ws, Actor player
 
                 _navi = NavigationDecision.Build(_naviCtx, ws.CurrentTime, hints, player, forbiddenZoneCushion: cushionSize);
 
-                _naviTimePathfinding = _navi.PathfindTime.TotalMilliseconds;
-                _naviTimeRaster = _navi.RasterizeTime.TotalMilliseconds;
+                _naviTimePathfinding = _navi.PathfindTime * 1000d / Stopwatch.Frequency;
+                _naviTimeRaster = _navi.RasterizeTime * 1000d / Stopwatch.Frequency;
                 _naviTimeTotal = _naviTimePathfinding + _naviTimeRaster;
 
                 sumPath += _naviTimePathfinding;
@@ -166,12 +180,14 @@ public sealed class AIHintsVisualizer(AIHints hints, WorldState ws, Actor player
     private MapVisualizer BuildPathfindingVisualizer()
     {
         if (hints.GoalZones.Count == 0 && ws.Actors.Find(player.TargetID) is var target && target != null)
+        {
             hints.GoalZones.Add(AIHints.GoalSingleTarget(target, preferredDistance));
+        }
 
         _navi = NavigationDecision.Build(_naviCtx, ws.CurrentTime, hints, player, forbiddenZoneCushion: cushionSize);
 
-        _naviTimePathfinding = _navi.PathfindTime.TotalMilliseconds;
-        _naviTimeRaster = _navi.RasterizeTime.TotalMilliseconds;
+        _naviTimePathfinding = _navi.PathfindTime * 1000d / Stopwatch.Frequency;
+        _naviTimeRaster = _navi.RasterizeTime * 1000d / Stopwatch.Frequency;
         _naviTimeTotal = _naviTimePathfinding + _naviTimeRaster;
         return new MapVisualizer(_naviCtx.Map, player.Position);
     }

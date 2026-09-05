@@ -28,11 +28,11 @@ public enum SID : uint
     Seduced = 991 // Boss->player, extra=0x19 (run speed is status extra * 0.1)
 }
 
-class DarkMistVoidFireIII(BossModule module) : Components.GenericAOEs(module)
+sealed class DarkMistVoidFireIII(BossModule module) : Components.GenericAOEs(module)
 {
     private AOEInstance[] _aoe = [];
     bool done;
-    private static readonly AOEShapeCircle circle = new(25f); // circle + minimum distance to survive seducing status
+    private readonly AOEShapeCircle circle = new(25f); // circle + minimum distance to survive seducing status
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
 
@@ -91,7 +91,7 @@ sealed class FatalAllureStates : StateMachineBuilder
 }
 
 [ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.ForayFATE, GroupID = 1018, NameID = 1971)]
-public sealed class FatalAllure(WorldState ws, Actor primary) : SimpleBossModule(ws, primary)
+public sealed class FatalAllure(WorldState ws, Actor primary) : OpenWorldFate(ws, primary)
 {
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {

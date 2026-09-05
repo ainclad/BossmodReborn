@@ -3,8 +3,8 @@
 // generic component for cleaving autoattacks; shows shape outline and warns when anyone other than main target is inside
 // enemy OID == 0 means 'primary actor'
 
-[SkipLocalsInit]
-public class Cleave(BossModule module, uint aid, AOEShape shape, uint[]? enemyOID = null, bool activeForUntargetable = false, bool originAtTarget = false, bool activeWhileCasting = true) : CastCounter(module, aid)
+public class Cleave(BossModule module, uint aid, AOEShape shape, uint[]? enemyOID = null, bool activeForUntargetable = false, bool originAtTarget = false, bool activeWhileCasting = true,
+    int? arenaProjectionLayer = null, bool restrictToArenaProjectionLayer = false) : CastCounter(module, aid)
 {
     public readonly AOEShape Shape = shape;
     public readonly bool ActiveForUntargetable = activeForUntargetable;
@@ -12,13 +12,22 @@ public class Cleave(BossModule module, uint aid, AOEShape shape, uint[]? enemyOI
     public readonly bool OriginAtTarget = originAtTarget;
     public DateTime NextExpected;
     public readonly uint[] EnemyOID = enemyOID ?? [module.PrimaryActor.OID];
+    public int? ArenaProjectionLayer = arenaProjectionLayer;
+    public bool RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
 
     public override void AddHints(int slot, Actor actor, TextHints hints)
     {
+        if (!ArenaProjectionLayerParticipantApplies(actor, ArenaProjectionLayer, RestrictToArenaProjectionLayer))
+        {
+            return;
+        }
+
         var origins = OriginsAndTargets();
         var count = origins.Count;
         if (count == 0)
+        {
             return;
+        }
 
         for (var i = 0; i < count; ++i)
         {
@@ -33,18 +42,29 @@ public class Cleave(BossModule module, uint aid, AOEShape shape, uint[]? enemyOI
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        if (!ArenaProjectionLayerApplies(actor, ArenaProjectionLayer, RestrictToArenaProjectionLayer))
+        {
+            return;
+        }
+
         var origins = OriginsAndTargets();
         var count = origins.Count;
         if (count == 0)
+        {
             return;
+        }
 
         for (var i = 0; i < count; ++i)
         {
             var e = origins[i];
             if (actor != e.target)
-                hints.AddForbiddenZone(Shape, e.origin.Position.Quantized(), e.angle, NextExpected);
+            {
+                hints.AddForbiddenZone(Shape, e.origin.Position.Quantized(), e.angle, NextExpected, arenaProjectionLayer: ArenaProjectionLayer);
+            }
             else
+            {
                 AddTargetSpecificHints(ref actor, ref e.origin, ref hints);
+            }
         }
     }
 
@@ -56,17 +76,24 @@ public class Cleave(BossModule module, uint aid, AOEShape shape, uint[]? enemyOI
         {
             var a = raid[i];
             if (a == actor)
+            {
                 continue;
+            }
+            if (!ArenaProjectionLayerParticipantApplies(a, ArenaProjectionLayer, RestrictToArenaProjectionLayer))
+            {
+                continue;
+            }
+
             switch (Shape)
             {
                 case AOEShapeCircle circle:
-                    hints.AddForbiddenZone(circle, a.Position.Quantized());
+                    hints.AddForbiddenZone(circle, a.Position.Quantized(), arenaProjectionLayer: ArenaProjectionLayer);
                     break;
                 case AOEShapeCone cone:
-                    hints.AddForbiddenZone(new SDCone(source.Position.Quantized(), 100f, source.AngleTo(a), cone.HalfAngle));
+                    hints.AddForbiddenZone(new SDCone(source.Position.Quantized(), 100f, source.AngleTo(a), cone.HalfAngle), arenaProjectionLayer: ArenaProjectionLayer);
                     break;
                 case AOEShapeRect rect:
-                    hints.AddForbiddenZone(new SDCone(source.Position.Quantized(), 100f, source.AngleTo(a), Angle.Asin(rect.HalfWidth / (a.Position - source.Position).Length())));
+                    hints.AddForbiddenZone(new SDCone(source.Position.Quantized(), 100f, source.AngleTo(a), Angle.Asin(rect.HalfWidth / (a.Position - source.Position).Length())), arenaProjectionLayer: ArenaProjectionLayer);
                     break;
             }
         }
@@ -80,7 +107,10 @@ public class Cleave(BossModule module, uint aid, AOEShape shape, uint[]? enemyOI
         for (var i = 0; i < count; ++i)
         {
             var e = origins[i];
-            Shape.Outline(Arena, e.origin.Position.Quantized(), e.angle);
+            using (Arena.WorldProjectionLayer(ArenaProjectionLayer, RestrictToArenaProjectionLayer))
+            {
+                Shape.Outline(Arena, e.origin.Position.Quantized(), e.angle);
+            }
         }
     }
 
@@ -88,21 +118,27 @@ public class Cleave(BossModule module, uint aid, AOEShape shape, uint[]? enemyOI
     {
         var enemies = Module.Enemies(EnemyOID);
         var count = enemies.Count;
-        List<(Actor, Actor, Angle)> origins = new(count);
+        List<(Actor, Actor, Angle)> origins = [with(count)];
         for (var i = 0; i < count; ++i)
         {
             var enemy = enemies[i];
             if (enemy.IsDead)
+            {
                 continue;
+            }
 
             if (!ActiveForUntargetable && !enemy.IsTargetable)
+            {
                 continue;
+            }
 
             if (!ActiveWhileCasting && enemy.CastInfo != null)
+            {
                 continue;
+            }
 
             var target = WorldState.Actors.Find(enemy.TargetID);
-            if (target != null)
+            if (target != null && ArenaProjectionLayerParticipantApplies(target, ArenaProjectionLayer, RestrictToArenaProjectionLayer))
             {
                 origins.Add(new(OriginAtTarget ? target : enemy, target, Angle.FromDirection(target.Position - enemy.Position)));
             }

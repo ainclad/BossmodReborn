@@ -69,7 +69,6 @@ public abstract partial class AutoClear : ZoneModule
 
     private readonly Dictionary<ulong, PomanderID> _chestContentsGold = [];
     private readonly Dictionary<ulong, int> _chestContentsSilver = [];
-    private readonly HashSet<ulong> _openedChests = [];
     private readonly HashSet<ulong> _fakeExits = [];
     private PomanderID? _lastChestContentsGold;
     private bool _lastChestMagicite;
@@ -117,7 +116,6 @@ public abstract partial class AutoClear : ZoneModule
                 if (!op.IsAlly && op.IsDead)
                     ++Kills;
             }),
-            ws.Actors.EventOpenTreasure.Subscribe(OnOpenTreasure),
             ws.Actors.EventObjectAnimation.Subscribe(OnEObjAnim),
             ws.DeepDungeon.MapDataChanged.Subscribe(_ =>
             {
@@ -220,8 +218,6 @@ public abstract partial class AutoClear : ZoneModule
         }
     }
 
-    private void OnOpenTreasure(Actor chest) => _openedChests.Add(chest.InstanceID);
-
     private void OnEObjAnim(Actor actor, ushort p1, ushort p2)
     {
         // fake beacon deactivation; accompanied by system log #9217 but it does not indicate a specific actor
@@ -253,8 +249,8 @@ public abstract partial class AutoClear : ZoneModule
         _chestContentsGold.Clear();
         _chestContentsSilver.Clear();
         _trapsHidden = true;
-        _openedChests.Clear();
         _fakeExits.Clear();
+        _losCache.Clear();
         OnChangeFloors();
         BetweenFloors = true;
     }
@@ -415,7 +411,7 @@ public abstract partial class AutoClear : ZoneModule
                 // TODO use magicite/demiclone to prevent overcap
                 continue;
 
-            if (_openedChests.Contains(a.InstanceID) || _fakeExits.Contains(a.InstanceID))
+            if (a.IsOpenTreasure || _fakeExits.Contains(a.InstanceID))
                 continue;
 
             var oid = a.OID;
@@ -753,44 +749,8 @@ public abstract partial class AutoClear : ZoneModule
         var casterX = (int)casterCell.X;
         var casterZ = (int)casterCell.Z;
 
-        var bm = new Bitmap(data.Width, data.Height, data.Color0, data.Color1, data.Resolution);
-        for (var i = Math.Max(0, casterX - pixelRange); i <= Math.Min(data.Width, casterX + pixelRange); ++i)
-        {
-            for (var j = Math.Max(0, casterZ - pixelRange); j <= Math.Min(data.Height, casterZ + pixelRange); ++j)
-            {
-                var pt = new Vector2(i, j);
-                var cc = new Vector2(casterX, casterZ);
-                if (!IsBlocked(data, pt, cc, pixelRange))
-                    bm[i, j] = true;
-            }
-        }
-
+        var bm = BitmapShadowcasting.BuildFieldOfView(data, casterX, casterZ, pixelRange);
         _losCache[Source.InstanceID] = (entry.Origin, bm);
         LOS.Add(Source);
-    }
-
-    private static bool IsBlocked(Bitmap map, Vector2 point, Vector2 origin, float maxRange)
-    {
-        var dir = origin - point;
-        var dist = dir.Length();
-        if (dist >= maxRange)
-            return true;
-
-        dir /= dist;
-
-        var ox = point.X;
-        var oy = point.Y;
-        var vx = dir.X;
-        var vy = dir.Y;
-
-        for (var i = 0; i < (int)dist; ++i)
-        {
-            if (map[(int)ox, (int)oy])
-                return true;
-            ox += vx;
-            oy += vy;
-        }
-
-        return false;
     }
 }

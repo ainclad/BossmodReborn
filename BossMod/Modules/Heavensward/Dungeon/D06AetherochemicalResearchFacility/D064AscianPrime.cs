@@ -130,7 +130,7 @@ class Stars(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeDonut donut = new(5f, 40f);
     private static readonly AOEShapeCircle circle = new(16f);
-    private readonly List<AOEInstance> _aoes = new(3);
+    private readonly List<AOEInstance> _aoes = [with(3)];
     private static readonly WPos _frozenStarShortTether = new(230f, 86f), _frozenStarLongTether = new(230f, 92f);
     private static readonly WPos _donut = new(230f, 79f), _circle1 = new(241f, 79f), _circle2 = new(219f, 79f);
 
@@ -215,14 +215,24 @@ class D064AscianPrimeStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.Verified, Contributors = "The Combat Reborn Team (Malediktus, LTS)", GroupType = BossModuleInfo.GroupType.CFC, GroupID = 38, NameID = 3823, SortOrder = 11)]
-public class D064AscianPrime(WorldState ws, Actor primary) : BossModule(ws, primary, arena.Center, arena)
+[ModuleInfo(BossModuleInfo.Maturity.Verified, Contributors = "The Combat Reborn Team (Malediktus, LTS)", GroupType = BossModuleInfo.GroupType.CFC, GroupID = 38u, NameID = 3823u, SortOrder = 11)]
+public sealed class D064AscianPrime : BossModule
 {
-    public static readonly ArenaBoundsCustom arena = new([new Polygon(new(230f, 79f), 20.26f, 24)], [new Rectangle(new(230f, 98f), 5, 1.5f)], [new Rectangle(new(228.95f, 97f), 6.55f, 1.7f)]);
+    public D064AscianPrime(WorldState ws, Actor primary) : this(ws, primary, BuildArena()) { }
+
+    private D064AscianPrime(WorldState ws, Actor primary, (WPos center, ArenaBoundsCustom arena) a) : base(ws, primary, a.center, a.arena) { }
+
+    private static (WPos center, ArenaBoundsCustom arena) BuildArena()
+    {
+        var arena = new ArenaBoundsCustom([new Polygon(new(230f, 79f), 20.26f, 24)], [new Rectangle(new(230f, 98f), 5f, 1.5f)], [new Rectangle(new(228.95f, 97f), 6.55f, 1.7f)]);
+        return (arena.Center, arena);
+    }
 
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {
         Arena.Actor(PrimaryActor);
         Arena.Actors(Enemies((uint)OID.ArcaneSphere));
     }
+
+    public override bool ShouldPrioritizeAllEnemies => true;
 }

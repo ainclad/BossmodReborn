@@ -4,17 +4,26 @@
 // Since the game API is sending a packet, this implements some rate limiting.
 public sealed class CancelCastTweak(WorldState ws, AIHints hints)
 {
-    private readonly ActionTweaksConfig _config = Service.Config.Get<ActionTweaksConfig>();
+    private static readonly ActionTweaksConfig _config = Service.Config.Get<ActionTweaksConfig>();
     private readonly WorldState _ws = ws;
     private DateTime _nextCancelAllowed;
+
+    public void Reset()
+    {
+        _nextCancelAllowed = default;
+    }
 
     public bool ShouldCancel(DateTime currentTime, bool force)
     {
         if (currentTime < _nextCancelAllowed)
+        {
             return false;
+        }
 
         if (!force && !WantCancel())
+        {
             return false;
+        }
 
         _nextCancelAllowed = currentTime.AddSeconds(0.2d);
         return true;
@@ -22,28 +31,59 @@ public sealed class CancelCastTweak(WorldState ws, AIHints hints)
 
     private bool WantCancel()
     {
-        if (_config.PyreticThreshold > 0 && hints.ImminentSpecialMode.mode == AIHints.SpecialMode.Pyretic && hints.ImminentSpecialMode.activation < _ws.FutureTime(_config.PyreticThreshold))
+        if (_config.PyreticThreshold > 0f && hints.ImminentSpecialMode.mode == AIHints.SpecialMode.Pyretic && hints.ImminentSpecialMode.activation < _ws.FutureTime(_config.PyreticThreshold))
+        {
             return true;
+        }
 
         var cast = _ws.Party.Player()?.CastInfo;
         if (cast == null || cast.Action.Type == ActionType.KeyItem) // don't auto cancel quest items, that's never a good idea
+        {
             return false;
+        }
+
+        // mount doesn't break movement as of 7.whatever
+        if (cast.Action.Type == ActionType.Mount)
+        {
+            return false;
+        }
 
         var target = _ws.Actors.Find(cast.TargetID);
         if (target == null)
+        {
             return false;
+        }
 
-        if (hints.FindEnemy(target)?.Priority == AIHints.Enemy.PriorityForbidden)
+        if ((_config.PreventForbiddenTargets || AI.AIManager.Instance?.Beh != null || Autorotation.MiscAI.NormalMovement.Instance != null) && hints.FindEnemy(target)?.Priority == AIHints.Enemy.PriorityForbidden)
+        {
             return true;
+        }
 
         if (!_config.CancelCastOnDeadTarget)
+        {
             return false;
+        }
 
         var isRaise = Service.LuminaRow<Lumina.Excel.Sheets.Action>(cast.Action.SpellId())?.DeadTargetBehaviour == 1;
         if (!isRaise)
+        {
             return target.IsDead;
+        }
 
         // for raise spells, we want to cancel them if target becomes alive or gains 'raise' status
-        return !target.IsDead || target.Statuses.Any(s => s.ID is 148 or 1140);
+        var hasRaiseStatus = false;
+
+        var statuses = target.Statuses.AsSpan();
+        var len = statuses.Length;
+        for (var i = 0; i < len; ++i)
+        {
+            if (statuses[i].ID is 148u or 1140u)
+            {
+                hasRaiseStatus = true;
+                break;
+            }
+        }
+
+        return !target.IsDead || hasRaiseStatus;
     }
 }

@@ -55,7 +55,7 @@ sealed class HallOfSorrow(BossModule module) : Components.SimpleAOEs(module, (ui
 sealed class MenaceCharge(BossModule module) : Components.GenericAOEs(module)
 {
     private AOEInstance[] _aoe = [];
-    private static readonly AOEShapeCircle circle = new(20f);
+    private readonly AOEShapeCircle circle = new(20f);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
 
@@ -91,4 +91,4 @@ sealed class ServingDarknessStates : StateMachineBuilder
 }
 
 [ModuleInfo(BossModuleInfo.Maturity.AISupport, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.ForayFATE, GroupID = 1018, NameID = 1972)]
-public sealed class ServingDarkness(WorldState ws, Actor primary) : SimpleBossModule(ws, primary);
+public sealed class ServingDarkness(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);

@@ -52,6 +52,12 @@ public enum StrategyEnemySelection : int
     HighestMaxHP = 4,
 }
 
+public enum StrategyCondition : int
+{
+    None = 0,
+    AssignedRole = 1
+}
+
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class TrackAttribute() : Attribute
 {
@@ -69,7 +75,7 @@ public sealed class TrackAttribute() : Attribute
     public object Action
     {
         set => Actions = [value];
-        get => Actions[0];
+        get => new();
     }
     public object[] Actions
     {
@@ -77,12 +83,12 @@ public sealed class TrackAttribute() : Attribute
             BozjaHolsterID id => BozjaActionID.GetNormal(id),
             var x => ActionID.MakeSpell((Enum)x)
         })];
-        get => [.. ActionIDs];
+        get => [];
     }
     public object Item
     {
         set => ActionIDs = [new(ActionType.Item, (uint)(int)value)];
-        get => ActionIDs[0];
+        get => new();
     }
 
     // fallback values for all options in track
@@ -92,6 +98,17 @@ public sealed class TrackAttribute() : Attribute
     public int MinLevel;
     public int MaxLevel;
     public float DefaultPriority;
+
+    public object OGCDPriority
+    {
+        set => DefaultPriority = ActionQueue.Priority.Low + (int)value;
+        get => new();
+    }
+    public object GCDPriority
+    {
+        set => DefaultPriority = ActionQueue.Priority.High + (int)value;
+        get => new();
+    }
 }
 
 [AttributeUsage(AttributeTargets.Field)]
@@ -125,6 +142,17 @@ public sealed class OptionAttribute() : Attribute
     public float DefaultPriority;
     public StrategyContext Context;
     public uint Color;
+
+    public object OGCDPriority
+    {
+        set => DefaultPriority = ActionQueue.Priority.Low + (int)value;
+        get => new();
+    }
+    public object GCDPriority
+    {
+        set => DefaultPriority = ActionQueue.Priority.High + (int)value;
+        get => new();
+    }
 }
 
 public abstract record class StrategyConfig(
@@ -134,6 +162,9 @@ public abstract record class StrategyConfig(
     Type Renderer // custom drawing for regular config, plan UI still uses old editor
 )
 {
+    public int VisibleWhenTrack = -1; // if >= 0, only show this track when the dependency track's option equals VisibleWhenOption
+    public int VisibleWhenOption;
+
     public abstract StrategyValue CreateEmpty();
     public abstract StrategyValue CreateForEditor();
 
@@ -257,7 +288,7 @@ public record class StrategyValueTrack : StrategyValue
         if (js.TryGetProperty(nameof(PriorityOverride), out var jprio))
             PriorityOverride = jprio.GetSingle();
         if (js.TryGetProperty(nameof(Target), out var jtarget))
-            Target = Enum.Parse<StrategyTarget>(jtarget.GetString() ?? "");
+            Target = GeneratedEnumMetadata.Parse<StrategyTarget>(jtarget.GetString() ?? "");
         if (js.TryGetProperty(nameof(TargetParam), out var jtp))
             TargetParam = jtp.GetInt32();
         if (js.TryGetProperty(nameof(Offset1), out var joff1))
@@ -383,28 +414,5 @@ public record struct Track<T>(T Value, StrategyValue Raw, float DefaultPriority)
 
 static class ValueConverter
 {
-    public static T FromValues<T>(StrategyValues values) where T : struct
-    {
-        object val = default(T);
-
-        var i = 0;
-        foreach (var field in typeof(T).GetFields())
-        {
-            switch (values.Values[i])
-            {
-                case StrategyValueTrack t:
-                    field.SetValue(val, Activator.CreateInstance(field.FieldType, [Enum.ToObject(field.FieldType.GenericTypeArguments[0], t.Option), t, ((StrategyConfigTrack)values.Configs[i]).Options[t.Option].DefaultPriority]));
-                    break;
-                case StrategyValueFloat f:
-                    field.SetValue(val, new Track<float>(f.Value, f, float.NaN));
-                    break;
-                case StrategyValueInt i2:
-                    field.SetValue(val, new Track<long>(i2.Value, i2, float.NaN));
-                    break;
-            }
-            ++i;
-        }
-
-        return (T)val;
-    }
+    public static T FromValues<T>(StrategyValues values) where T : struct => GeneratedStrategies.ConvertValues<T>(values);
 }

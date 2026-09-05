@@ -1,4 +1,4 @@
-namespace BossMod.Endwalker.DeepDungeon.PilgrimsTraverse.DD99EminentGrief;
+namespace BossMod.Dawntrail.DeepDungeon.PilgrimsTraverse.DD99EminentGrief;
 
 public enum OID : uint
 {
@@ -80,7 +80,6 @@ public enum IconID : uint
     Spinelash = 234 // player->self
 }
 
-[SkipLocalsInit]
 sealed class LightAndDark(BossModule module) : LightAndDarkBase(module)
 {
     private readonly DD99EminentGrief bossmod = (DD99EminentGrief)module;
@@ -253,10 +252,8 @@ sealed class LightAndDark(BossModule module) : LightAndDarkBase(module)
     }
 }
 
-[SkipLocalsInit]
 sealed class TerrorEyeBallOfFire(BossModule module) : Components.SimpleAOEGroups(module, [(uint)AID.TerrorEye, (uint)AID.BallOfFire], 6f);
 
-[SkipLocalsInit]
 sealed class ChainsOfCondemnation(BossModule module) : Components.StayMove(module, 2d)
 {
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -289,10 +286,8 @@ sealed class ChainsOfCondemnation(BossModule module) : Components.StayMove(modul
     }
 }
 
-[SkipLocalsInit]
 sealed class BladeOfFirstLight(BossModule module) : Components.SimpleAOEGroups(module, [(uint)AID.BladeOfFirstLight1, (uint)AID.BladeOfFirstLight2], new AOEShapeRect(30f, 7.5f));
 
-[SkipLocalsInit]
 sealed class BoundsOfSinSmallAOE : Components.SimpleAOEs
 {
     public BoundsOfSinSmallAOE(BossModule module) : base(module, (uint)AID.BoundsOfSin, 3f)
@@ -301,12 +296,11 @@ sealed class BoundsOfSinSmallAOE : Components.SimpleAOEs
     }
 }
 
-[SkipLocalsInit]
 sealed class BoundsOfSinEnd(BossModule module) : Components.GenericAOEs(module)
 {
     private AOEInstance[] _aoe = [];
     private readonly AOEShapeCircle circle = new(8f);
-    private readonly List<Polygon> pillars = new(12);
+    private readonly List<Polygon> pillars = [with(12)];
     private const float radius = 2.57745f; // adjusted for hitbox radius
 
     private readonly Polygon[] pillarPolygons =
@@ -351,18 +345,17 @@ sealed class BoundsOfSinEnd(BossModule module) : Components.GenericAOEs(module)
             if (state == 0x00020001u)
             {
                 pillars.Add(pillarPolygons[index]);
-                Arena.Bounds = new ArenaBoundsCustom([new Rectangle(DD99EminentGrief.ArenaCenter, 20f, 15f)], [.. pillars]);
+                Arena.Bounds = new ArenaBoundsCustom([new Rectangle(new(-600f, -300f), 20f, 15f)], [.. pillars]);
             }
             else if (index == 0x00 && state == 0x00080004u)
             {
-                Arena.Bounds = new ArenaBoundsCustom([new Rectangle(DD99EminentGrief.ArenaCenter, 20f, 15f)], AdjustForHitboxOutwards: true);
+                Arena.Bounds = DD99EminentGrief.BuildArena().arena;
                 pillars.Clear();
             }
         }
     }
 }
 
-[SkipLocalsInit]
 sealed class SpinelashBait(BossModule module) : Components.GenericBaitAway(module)
 {
     private readonly AOEShapeRect rect = new(60f, 2f);
@@ -388,7 +381,6 @@ sealed class SpinelashBait(BossModule module) : Components.GenericBaitAway(modul
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }  // not really needed until cast starts
 }
 
-[SkipLocalsInit]
 sealed class SpinelashBaitHint(BossModule module) : Components.GenericAOEs(module)
 {
     private AOEInstance[] _aoe = [];
@@ -401,8 +393,8 @@ sealed class SpinelashBaitHint(BossModule module) : Components.GenericAOEs(modul
         if (iconID == (uint)IconID.Spinelash)
         {
             target = actor;
-            AOEShapeCustom shape = new([new Rectangle(new(-593f, -300f), 1f, 16f), new Rectangle(new(-607f, -300f), 1f, 16f)]);
             var pos = Arena.Center;
+            AOEShapeCustom shape = new(pos, [new Rectangle(new(-593f, -300f), 1f, 16f), new Rectangle(new(-607f, -300f), 1f, 16f)]);
             _aoe = [new(shape, pos, default, WorldState.FutureTime(6.3d), Colors.SafeFromAOE, shapeDistance: shape.InvertedDistance(pos, default))];
         }
     }
@@ -441,10 +433,8 @@ sealed class SpinelashBaitHint(BossModule module) : Components.GenericAOEs(modul
     }
 }
 
-[SkipLocalsInit]
 sealed class Spinelash(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Spinelash, new AOEShapeRect(60f, 2f));
 
-[SkipLocalsInit]
 sealed class BallOfFire(BossModule module) : Components.GenericBaitAway(module, centerAtTarget: true)
 {
     private readonly AOEShapeCircle circle = new(6f);
@@ -474,10 +464,9 @@ sealed class BallOfFire(BossModule module) : Components.GenericBaitAway(module, 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }  // not really needed until cast starts
 }
 
-[SkipLocalsInit]
 sealed class AbyssalBlaze(BossModule module) : Components.Exaflare(module, 5f)
 {
-    private readonly List<(WDir, WPos)> crystals = new(8);
+    private readonly List<(WDir, WPos)> crystals = [with(8)];
     private AOEShapeCustom? shape;
     private WDir next;
 
@@ -528,7 +517,8 @@ sealed class AbyssalBlaze(BossModule module) : Components.Exaflare(module, 5f)
                     var c = crystals[i];
                     rects[i] = new(c.Item2, 5f, 40f, c.Item1.ToAngle());
                 }
-                shape = new([new Rectangle(DD99EminentGrief.ArenaCenter, 20f, 15f)], rects);
+                var center = Arena.Center;
+                shape = new(center, [new Rectangle(center, 20f, 15f)], rects);
             }
         }
     }
@@ -594,7 +584,6 @@ sealed class AbyssalBlaze(BossModule module) : Components.Exaflare(module, 5f)
     }
 }
 
-[SkipLocalsInit]
 sealed class DD99EminentGriefStates : StateMachineBuilder
 {
     public DD99EminentGriefStates(BossModule module) : base(module)
@@ -613,34 +602,24 @@ sealed class DD99EminentGriefStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.AISupport,
-StatesType = typeof(DD99EminentGriefStates),
-ConfigType = null,
-ObjectIDType = typeof(OID),
-ActionIDType = typeof(AID),
-StatusIDType = typeof(SID),
-TetherIDType = null,
-IconIDType = typeof(IconID),
-PrimaryActorOID = (uint)OID.EminentGrief,
-Contributors = "The Combat Reborn Team (Malediktus)",
-Expansion = BossModuleInfo.Expansion.Dawntrail,
-Category = BossModuleInfo.Category.DeepDungeon,
-GroupType = BossModuleInfo.GroupType.CFC,
-GroupID = 1041u,
-NameID = 14037u,
-SortOrder = 1,
-PlanLevel = 0)]
-[SkipLocalsInit]
+[ModuleInfo(BossModuleInfo.Maturity.AISupport, PrimaryActorOID = (uint)OID.EminentGrief, Contributors = "The Combat Reborn Team (Malediktus)", GroupType = BossModuleInfo.GroupType.CFC, GroupID = 1041u, NameID = 14037u)]
 public sealed class DD99EminentGrief : BossModule // module also works in Final Verse normal, everything but the zone ID seem to be identical
 {
-    public DD99EminentGrief(WorldState ws, Actor primary) : base(ws, primary, ArenaCenter, new ArenaBoundsCustom([new Rectangle(ArenaCenter, 20f, 15f)], AdjustForHitboxOutwards: true))
+    public DD99EminentGrief(WorldState ws, Actor primary) : this(ws, primary, BuildArena()) { }
+
+    private DD99EminentGrief(WorldState ws, Actor primary, (WPos center, ArenaBoundsCustom arena) a) : base(ws, primary, a.center, a.arena)
     {
         ActivateComponent<LightAndDark>();
         FindComponent<LightAndDark>()!.AddAOE();
         vodorigas = Enemies((uint)OID.VodorigaMinion);
     }
 
-    public static readonly WPos ArenaCenter = new(-600f, -300f);
+    public static (WPos center, ArenaBoundsCustom arena) BuildArena()
+    {
+        var arena = new ArenaBoundsCustom([new Rectangle(new(-600f, -300f), 20f, 15f)], AdjustForHitboxOutwards: true);
+        return (arena.Center, arena);
+    }
+
     public Actor? BossEater;
     private readonly List<Actor> vodorigas;
 

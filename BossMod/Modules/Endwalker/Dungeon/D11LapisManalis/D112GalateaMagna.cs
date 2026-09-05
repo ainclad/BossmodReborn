@@ -48,7 +48,7 @@ public enum SID : uint
 sealed class ScarecrowChase(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCross cross = new(40f, 5f);
-    private readonly List<AOEInstance> _aoes = new(4);
+    private readonly List<AOEInstance> _aoes = [with(4)];
     private bool first = true;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
@@ -152,7 +152,7 @@ sealed class WaningCycle(BossModule module) : Components.ConcentricAOEs(module, 
 sealed class GlassyEyed(BossModule module) : Components.GenericGaze(module)
 {
     private DateTime _activation;
-    private readonly List<Actor> _affected = new(4);
+    private readonly List<Actor> _affected = [with(4)];
 
     public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor)
     {
@@ -161,13 +161,18 @@ sealed class GlassyEyed(BossModule module) : Components.GenericGaze(module)
         {
             return [];
         }
-        var eyes = new Eye[count];
-
+        var eyes = new List<Eye>(count);
         for (var i = 0; i < count; ++i)
         {
-            eyes[i] = new(_affected[i].Position, _activation);
+            var a = _affected[i];
+            if (a == actor)
+            {
+                continue;
+            }
+            var loc = a.Position.Quantized();
+            eyes.Add(new(loc, _activation, eyeCenter: loc));
         }
-        return eyes;
+        return CollectionsMarshal.AsSpan(eyes);
     }
 
     public override void OnStatusGain(Actor actor, ref ActorStatus status)

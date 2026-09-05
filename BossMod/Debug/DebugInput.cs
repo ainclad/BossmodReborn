@@ -152,7 +152,7 @@ internal sealed unsafe class DebugInput : IDisposable
         _prevPosRot = curPosRot;
         _prevSpeed = speedAbs;
         ImGui.TextUnformatted($"Speed={speedAbs:f3}, SpeedH={speed.XZ().Length():f3}, SpeedV={speed.Y:f3}, RSpeed={rotSpeed}, Accel={accel:f3}, Azimuth={Angle.FromDirection(new(speed.XZ()))}, Altitude={Angle.FromDirection(new(speed.Y, speed.XZ().Length()))}");
-        ImGui.TextUnformatted($"MO: desired={_move.DesiredDirection}, user={_move.UserMove}, actual={_move.ActualMove}");
+        ImGui.TextUnformatted($"MO: desired={Utils.Vec3String(_move.DesiredDirection ?? default)}, user={_move.UserMove}, actual={_move.ActualMove}");
         //Service.Log($"Speed: {speedAbs:f3}, accel: {accel:f3}");
 
         var pobj = GameObjectManager.Instance()->Objects.IndexSorted[0].Value;
@@ -196,7 +196,9 @@ internal sealed unsafe class DebugInput : IDisposable
             {
                 var mapping = new VirtualKey[256];
                 foreach (var vk in Service.KeyState.GetValidVirtualKeys())
+                {
                     mapping[_convertVirtualKey((int)vk)] = vk;
+                }
 
                 string bindString(byte v) => v switch
                 {
@@ -206,9 +208,19 @@ internal sealed unsafe class DebugInput : IDisposable
                     _ => $"gamepad{v - 0xA7}"
                 };
                 string printBinding(ushort v) => $"{((v & 0x100) != 0 ? "shift+" : "")}{((v & 0x200) != 0 ? "ctrl+" : "")}{((v & 0x400) != 0 ? "alt+" : "")}{((v & 0xF800) != 0 ? "?+" : "")}{bindString((byte)v)} ({v:X4})";
-                for (int i = 0; i < idata->KeybindCount; ++i)
+                for (var i = 0; i < idata->KeybindCount; ++i)
                 {
-                    _tree.LeafNode($"{i} = {string.Join(", ", Enumerable.Range(0, 5).Select(j => printBinding(idata->Keybinds[i].Bindings[j])))}");
+                    var sb = new StringBuilder();
+                    for (var j = 0; j < 5; ++j)
+                    {
+                        if (j > 0)
+                        {
+                            sb.Append(", ");
+                        }
+
+                        sb.Append(printBinding(idata->Keybinds[i].Bindings[j]));
+                    }
+                    _tree.LeafNode($"{i} = {sb}");
                 }
             }
         }

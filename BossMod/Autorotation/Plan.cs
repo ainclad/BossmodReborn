@@ -14,6 +14,8 @@ public sealed record class Plan(string Name, Type Encounter)
         public float WindowLength;
         public bool Disabled;
         public StrategyValue Value = Value;
+        public StrategyCondition ConditionType;
+        public int ConditionParam;
     }
 
     public readonly record struct Module(Type Type, RotationModuleDefinition Definition, Func<RotationModuleManager, Actor, RotationModule> Builder, List<List<Entry>> Tracks, List<StrategyValue> Defaults) : IRotationModuleData
@@ -60,17 +62,16 @@ public class JsonPlanConverter : JsonConverter<Plan>
         using var jdoc = JsonDocument.ParseValue(ref reader);
         var name = jdoc.RootElement.GetProperty(nameof(Plan.Name)).GetString() ?? "";
         var encName = jdoc.RootElement.GetProperty(nameof(Plan.Encounter)).GetString() ?? "";
-        var encType = Type.GetType(encName);
-        var encInfo = encType != null ? BossModuleRegistry.FindByType(encType) : null;
+        var encInfo = BossModuleRegistry.FindByTypeName(encName);
         if (encInfo == null)
         {
             Service.Log($"Error while deserializing plan {name}: failed to find encounter {encName}");
             return null;
         }
 
-        var res = new Plan(name, encType!)
+        var res = new Plan(name, encInfo.ModuleType)
         {
-            Class = Enum.Parse<Class>(jdoc.RootElement.GetProperty(nameof(Plan.Class)).GetString() ?? ""),
+            Class = GeneratedEnumMetadata.Parse<Class>(jdoc.RootElement.GetProperty(nameof(Plan.Class)).GetString() ?? ""),
             Level = jdoc.RootElement.GetProperty(nameof(Plan.Level)).GetInt32()
         };
         foreach (var jd in jdoc.RootElement.GetProperty(nameof(Plan.PhaseDurations)).EnumerateArray())
@@ -79,7 +80,7 @@ public class JsonPlanConverter : JsonConverter<Plan>
         }
         foreach (var jm in jdoc.RootElement.GetProperty(nameof(Plan.Modules)).EnumerateObject())
         {
-            var mt = Type.GetType(jm.Name);
+            var mt = RotationModuleRegistry.FindType(jm.Name);
             if (mt == null || !RotationModuleRegistry.Modules.TryGetValue(mt, out var md))
             {
                 Service.Log($"Error while deserializing plan {name} for L{res.Level} {res.Class} encounter {encName}: failed to find module {jm.Name}");
@@ -219,7 +220,7 @@ public class JsonPlanConverter : JsonConverter<Plan>
                 writer.WriteEndArray();
             }
             writer.WriteStartObject("_defaults");
-            for (int iDef = 0; iDef < m.Defaults.Count; ++iDef)
+            for (var iDef = 0; iDef < m.Defaults.Count; ++iDef)
             {
                 var def = m.Defaults[iDef];
                 if (def == default)
@@ -261,6 +262,12 @@ public class JsonPlanConverter : JsonConverter<Plan>
         if (jelem.TryGetProperty(nameof(Plan.Entry.Disabled), out var jdisabled))
             entry.Disabled = jdisabled.GetBoolean();
 
+        if (jelem.TryGetProperty(nameof(Plan.Entry.ConditionType), out var ctype))
+        {
+            entry.ConditionType = GeneratedEnumMetadata.Parse<StrategyCondition>(ctype.GetString() ?? "");
+            entry.ConditionParam = jelem.GetProperty(nameof(Plan.Entry.ConditionParam)).GetInt32();
+        }
+
         entry.Value.DeserializeFields(jelem);
     }
 
@@ -271,6 +278,12 @@ public class JsonPlanConverter : JsonConverter<Plan>
         writer.WriteNumber(nameof(Plan.Entry.WindowLength), entry.WindowLength);
         if (entry.Disabled)
             writer.WriteBoolean(nameof(Plan.Entry.Disabled), entry.Disabled);
+
+        if (entry.ConditionType != default)
+        {
+            writer.WriteString(nameof(Plan.Entry.ConditionType), entry.ConditionType.ToString());
+            writer.WriteNumber(nameof(Plan.Entry.ConditionParam), entry.ConditionParam);
+        }
 
         entry.Value.SerializeFields(writer);
     }

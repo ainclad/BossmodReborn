@@ -30,7 +30,7 @@ sealed class SurgingWaveShockwave(BossModule module) : Components.SimpleKnockbac
         {
             if (!polyInit)
             {
-                poly = arena.Polygon.Offset(-1f); // shrink polygon by 1 yalm for less suspect kb
+                poly = arena.Shape.Offset(-1f); // shrink polygon by 1 yalm for less suspect kb
                 polyInit = true;
             }
 
@@ -56,7 +56,9 @@ sealed class SurgingWaveSeaFoam(BossModule module) : Components.Voidzone(module,
         var enemies = module.Enemies((uint)OID.SeaFoam);
         var count = enemies.Count;
         if (count == 0)
+        {
             return [];
+        }
 
         var voidzones = new Actor[count];
         var index = 0;
@@ -64,7 +66,9 @@ sealed class SurgingWaveSeaFoam(BossModule module) : Components.Voidzone(module,
         {
             var z = enemies[i];
             if (!z.IsDead)
+            {
                 voidzones[index++] = z;
+            }
         }
         return voidzones[..index];
     }

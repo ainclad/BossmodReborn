@@ -1,7 +1,5 @@
 ﻿using Dalamud.Game.ClientState.Objects.Types;
 using System.Globalization;
-using System.Reflection;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace BossMod;
@@ -21,29 +19,10 @@ public static partial class Utils
         : obj.SubKind == 0 ? $"{obj.ObjectKind}"
         : $"{obj.ObjectKind}/{obj.SubKind}";
 
-    public static string ShowObject<T>(T obj)
-    {
-        var sb = new StringBuilder(typeof(T).Name);
-        sb.Append(" {");
-        var first = true;
-        foreach (var f in typeof(T).GetFields())
-        {
-            if (!first)
-                sb.Append(',');
-            var v = f.GetValue(obj);
-            sb.Append($" {f.Name} = {v}");
-            first = false;
-        }
-        sb.Append(" }");
-        return sb.ToString();
-    }
-
-    public static Vector2 XY(this Vector4 v) => new(v.X, v.Y);
+    public static Vector2 XY(this Vector4 v) => v.AsVector2();
     public static Vector3 XYZ(this Vector4 v) => v.AsVector3();
     public static Vector2 XZ(this Vector4 v) => new(v.X, v.Z);
     public static Vector2 XZ(this Vector3 v) => new(v.X, v.Z);
-
-    public static WPos ToWPos(this Vector3 v) => new(v.X, v.Z);
 
     public static bool AlmostEqual(float a, float b, float eps) => Math.Abs(a - b) <= eps;
 
@@ -70,8 +49,10 @@ public static partial class Utils
 
     public static bool IsPlayerSyncedToFate(WorldState world)
     {
-        if (world.Client.ActiveFate.ID == 0)
+        if (world.Client.ActiveFate.ID == 0u)
+        {
             return false;
+        }
 
         var fate = GetFateData(world.Client.ActiveFate.ID);
         return fate.EurekaFate == 1
@@ -83,11 +64,18 @@ public static partial class Utils
 
     public static readonly Func<uint, uint> GetFateItem = Memoize((uint fateID) => Service.LuminaRow<Lumina.Excel.Sheets.Fate>(fateID)?.EventItem.RowId ?? 0);
 
+    public static bool IsMultiplayerDuty(WorldState world) => Service.LuminaRow<Lumina.Excel.Sheets.ContentFinderCondition>(world.CurrentCFCID) is { } cfc && cfc.AllowUndersized;
+
+    public static bool IsUnsynced(WorldState world, Actor player) => Service.LuminaRow<Lumina.Excel.Sheets.ContentFinderCondition>(world.CurrentCFCID) is { } cfc && player.Level > cfc.ClassJobLevelSync;
+
     private static readonly Dictionary<uint, (byte, byte)> _fateCache = [];
     private static (byte ClassJobLevelMax, byte EurekaFate) GetFateData(uint fateID)
     {
         if (_fateCache.TryGetValue(fateID, out var fateRow))
+        {
             return fateRow;
+        }
+
         var row = Service.LuminaRow<Lumina.Excel.Sheets.Fate>(fateID);
         (byte, byte)? data;
         data = (row!.Value.ClassJobLevelMax, row.Value.EurekaFate);
@@ -97,9 +85,15 @@ public static partial class Utils
     // lumina extensions
     public static int FindIndex<T>(this Lumina.Excel.Collection<T> collection, Func<T, bool> predicate) where T : struct
     {
-        for (int i = 0; i < collection.Count; ++i)
+        var count = collection.Count;
+        for (var i = 0; i < count; ++i)
+        {
             if (predicate(collection[i]))
+            {
                 return i;
+            }
+        }
+
         return -1;
     }
 
@@ -108,7 +102,9 @@ public static partial class Utils
     {
         using var e = source.GetEnumerator();
         if (!e.MoveNext())
+        {
             return default;
+        }
 
         var res = e.Current;
         var score = keySelector(res);
@@ -129,7 +125,9 @@ public static partial class Utils
     {
         using var e = source.GetEnumerator();
         if (!e.MoveNext())
+        {
             return default;
+        }
 
         var res = e.Current;
         var score = keySelector(res);
@@ -161,8 +159,13 @@ public static partial class Utils
     public static T MaxAll<T>(T first, params T[] rest) where T : IComparable
     {
         foreach (var v in rest)
+        {
             if (v.CompareTo(first) > 0)
+            {
                 first = v;
+            }
+        }
+
         return first;
     }
 
@@ -170,7 +173,10 @@ public static partial class Utils
     public static bool AddIfNonNull<T>(this List<T> list, T? value)
     {
         if (value == null)
+        {
             return false;
+        }
+
         list.Add(value);
         return true;
     }
@@ -238,12 +244,16 @@ public static partial class Utils
             {
                 ++last;
                 if (i != last)
+                {
                     span[last] = span[i];
+                }
             }
         }
         ++last;
         if (last < list.Count)
+        {
             list.RemoveRange(last, list.Count - last);
+        }
     }
 
     // linear interpolation
@@ -261,7 +271,10 @@ public static partial class Utils
     {
         var res = new T[count];
         for (var i = 0; i < count; i++)
+        {
             res[i] = gen();
+        }
+
         return res;
     }
 
@@ -270,26 +283,6 @@ public static partial class Utils
     // bounds-checking access
     public static T? BoundSafeAt<T>(this T[] array, int index, T? outOfBounds = default) => index >= 0 && index < array.Length ? array[index] : outOfBounds;
     public static T? BoundSafeAt<T>(this List<T> array, int index, T? outOfBounds = default) => index >= 0 && index < array.Count ? array[index] : outOfBounds;
-
-    // get all types defined in specified assembly
-    public static IEnumerable<Type?> GetAllTypes(Assembly asm)
-    {
-        try
-        {
-            return asm.DefinedTypes;
-        }
-        catch (ReflectionTypeLoadException e)
-        {
-            return e.Types;
-        }
-    }
-
-    // get all types derived from specified type in specified assembly
-    public static IEnumerable<Type> GetDerivedTypes<Base>(Assembly asm)
-    {
-        var b = typeof(Base);
-        return GetAllTypes(asm).Where(t => t?.IsSubclassOf(b) ?? false).Select(t => t!);
-    }
 
     // generate valid identifier name from human-readable string
     public static string StringToIdentifier(string v)
@@ -313,7 +306,9 @@ public static partial class Utils
             var i = 0;
             var key = k;
             while (!keys.Add(key))
+            {
                 key = $"{k}{++i}";
+            }
 
             yield return (key, v);
         }
@@ -325,7 +320,9 @@ public static partial class Utils
         return input =>
         {
             if (cache.TryGetValue(input, out var cached))
+            {
                 return cached;
+            }
 
             return cache[input] = func(input);
         };

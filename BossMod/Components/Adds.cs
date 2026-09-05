@@ -1,7 +1,6 @@
 ﻿namespace BossMod.Components;
 
 // generic component used for drawing adds
-[SkipLocalsInit]
 public class Adds(BossModule module, uint oid, int priority = 0, bool forbidDots = false) : BossComponent(module)
 {
     public readonly List<Actor> Actors = module.Enemies(oid);
@@ -23,19 +22,12 @@ public class Adds(BossModule module, uint oid, int priority = 0, bool forbidDots
         }
     }
 
-    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-    {
-        hints.PrioritizeTargetsByOIDAndForbidDOTs(oid, priority, forbidDots);
-    }
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) => hints.PrioritizeTargetsByOIDAndForbidDOTs(oid, priority, forbidDots);
 
-    public override void DrawArenaForeground(int pcSlot, Actor pc)
-    {
-        Arena.Actors(Actors);
-    }
+    public override void DrawArenaForeground(int pcSlot, Actor pc) => Arena.Actors(Actors);
 }
 
 // component for adds that shouldn't be targeted at all, but should still be drawn
-[SkipLocalsInit]
 public class AddsPointless(BossModule module, uint oid) : Adds(module, oid)
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
@@ -49,7 +41,6 @@ public class AddsPointless(BossModule module, uint oid) : Adds(module, oid)
 }
 
 // generic component used for drawing multiple adds with multiple oids, when it's not useful to distinguish between them
-[SkipLocalsInit]
 public class AddsMulti(BossModule module, uint[] oids, int priority = 0) : BossComponent(module)
 {
     public readonly uint[] OIDs = oids;
@@ -59,7 +50,7 @@ public class AddsMulti(BossModule module, uint[] oids, int priority = 0) : BossC
         {
             var enemies = Module.Enemies(OIDs);
             var count = enemies.Count;
-            List<Actor> activeActors = new(count);
+            List<Actor> activeActors = [with(count)];
             for (var i = 0; i < count; ++i)
             {
                 var actor = enemies[i];
@@ -80,8 +71,5 @@ public class AddsMulti(BossModule module, uint[] oids, int priority = 0) : BossC
         }
     }
 
-    public override void DrawArenaForeground(int pcSlot, Actor pc)
-    {
-        Arena.Actors(Module, OIDs);
-    }
+    public override void DrawArenaForeground(int pcSlot, Actor pc) => Arena.Actors(Module, OIDs);
 }
